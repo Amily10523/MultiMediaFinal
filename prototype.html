@@ -1,0 +1,1511 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>奇幻房間定位 Prototype 控制台</title>
+    <!-- 使用 Tailwind CSS 以獲得現代化極簡的美觀介面 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 基礎自訂樣式 */
+        body {
+            background-color: #0f172a;
+            color: #f1f5f9;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        /* 房源主要容器：比例鎖定為 16:9 */
+        .ratio-container {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            overflow: hidden;
+            background-color: #020617;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        /* 各互動元件防塌陷寬高比 (當圖片載入失敗時仍能維持正確比例的外框) */
+        #switch-btn { aspect-ratio: 400 / 600; }
+        #door-handle-btn { aspect-ratio: 800 / 400; }
+        #pointer-img { aspect-ratio: 800 / 800; }
+        #music-box-btn { aspect-ratio: 1 / 1; }
+        #music-note-img { aspect-ratio: 1 / 1; }
+
+        /* 點擊反饋動畫：門把旋轉回彈效果 */
+        @keyframes doorBounce {
+            0% { transform: rotate(0deg) scale(1); }
+            30% { transform: rotate(var(--click-rotation, 15deg)) scale(0.95); }
+            70% { transform: rotate(-4deg) scale(1.02); }
+            100% { transform: rotate(0deg) scale(1); }
+        }
+        .door-active {
+            animation: doorBounce 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+        }
+
+        /* 音樂播放時，音符的輕微浮動、左右搖晃與微微旋轉動畫 (參數全由 CSS 變數動態驅動) */
+        @keyframes dynamicNoteAnimation {
+            0% {
+                transform: translateY(0px) translateX(0px) rotate(0deg);
+            }
+            25% {
+                transform: translateY(calc(-1px * var(--float-amp, 10))) translateX(calc(1px * var(--sway-amp, 8))) rotate(calc(1deg * var(--rot-amp, 12)));
+            }
+            50% {
+                transform: translateY(0px) translateX(0px) rotate(0deg);
+            }
+            75% {
+                transform: translateY(calc(1px * var(--float-amp, 10))) translateX(calc(-1px * var(--sway-amp, 8))) rotate(calc(-1deg * var(--rot-amp, 12)));
+            }
+            100% {
+                transform: translateY(0px) translateX(0px) rotate(0deg);
+            }
+        }
+        .music-playing {
+            animation: dynamicNoteAnimation var(--anim-speed, 2s) ease-in-out infinite;
+        }
+
+        /* 滑桿美化 */
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            background: #334155;
+            height: 6px;
+            border-radius: 9999px;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #38bdf8;
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+        input[type="range"]::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+        }
+
+        /* 除錯框線設定：利用 outline 避免影響實際排版與尺寸計算 */
+        .debug-enabled #room-image { outline: 2px dashed #a855f7; outline-offset: -2px; }
+        .debug-enabled #video-player { outline: 2px dashed #eab308; outline-offset: -2px; }
+        .debug-enabled #switch-btn { outline: 2px dashed #ef4444; outline-offset: -2px; }
+        .debug-enabled #door-handle-btn { outline: 2px dashed #22c55e; outline-offset: -2px; }
+        .debug-enabled #pointer-img { outline: 2px dashed #f97316; outline-offset: -2px; }
+        .debug-enabled #music-box-btn { outline: 2px dashed #ec4899; outline-offset: -2px; }
+        .debug-enabled #music-note-img { outline: 2px dashed #3b82f6; outline-offset: -2px; }
+
+        /* 除錯標籤：改為浮動在元件上方，絕不遮擋素材，且不阻擋滑鼠點擊 */
+        .debug-label {
+            display: none;
+            position: absolute;
+            bottom: 100%;
+            left: 0;
+            margin-bottom: 4px;
+            white-space: nowrap;
+            pointer-events: none; /* 點擊穿透，不干擾點擊 */
+            z-index: 50;
+        }
+        .debug-enabled .debug-label {
+            display: block;
+        }
+
+        /* 模擬室外漸層背景（無影片時使用） */
+        .mock-desert-day {
+            background: linear-gradient(180deg, #fbcfe8 0%, #fde047 40%, #ea580c 100%);
+        }
+        .mock-desert-night {
+            background: linear-gradient(180deg, #0f172a 0%, #311042 50%, #581c87 100%);
+        }
+        .mock-ice-day {
+            background: linear-gradient(180deg, #bae6fd 0%, #38bdf8 50%, #0369a1 100%);
+        }
+        .mock-ice-night {
+            background: linear-gradient(180deg, #020617 0%, #0f172a 50%, #1e40af 100%);
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col lg:flex-row overflow-hidden">
+
+    <!-- 左半邊：主視覺互動預覽區 -->
+    <div class="flex-1 flex flex-col justify-between p-4 lg:p-6 bg-slate-950 overflow-y-auto">
+        <!-- 頂部狀態列 -->
+        <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
+            <div>
+                <h1 class="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+                    <span class="inline-block w-3.5 h-3.5 rounded-full bg-cyan-400 animate-pulse"></span>
+                    奇幻房間互動定位 Prototype
+                </h1>
+                <p class="text-xs text-slate-400 mt-1">您可以利用右側控制面板，點擊、拖動並即時輸出定位 CONFIG</p>
+            </div>
+            
+            <!-- 目前網頁狀態 Badge -->
+            <div class="flex items-center gap-2 text-xs font-mono">
+                <span class="text-slate-400">目前狀態:</span>
+                <span id="badge-time" class="px-2.5 py-1 rounded-full bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 font-bold uppercase transition-all">DAY</span>
+                <span id="badge-scene" class="px-2.5 py-1 rounded-full bg-orange-500/10 text-orange-400 border border-orange-500/20 font-bold uppercase transition-all">DESERT</span>
+            </div>
+        </div>
+
+        <!-- 畫布集中容器 -->
+        <div class="flex-1 flex items-center justify-center py-4">
+            
+            <!-- ========================================== -->
+            <!-- roomContainer: 主視覺主要容器 (16:9)       -->
+            <!-- ========================================== -->
+            <div id="room-container" class="ratio-container rounded-xl border border-slate-800 transition-all">
+                
+                <!-- 1. videoPlayer：最底層，放置窗外影片 -->
+                <div id="video-player" class="absolute pointer-events-none overflow-hidden select-none z-10 transition-all">
+                    <!-- 實際影片播放器 -->
+                    <video id="room-video" class="w-full h-full object-cover" autoplay muted loop playsinline></video>
+                    
+                    <!-- 影片缺席或載入中時的漸層模擬器 -->
+                    <div id="video-placeholder" class="absolute inset-0 flex flex-col items-center justify-center text-center p-3 transition-opacity duration-300">
+                        <!-- 動態太陽/月亮/雲朵/極光 mock 裝飾 -->
+                        <div id="mock-sky-element" class="w-16 h-16 rounded-full bg-yellow-200 blur-sm animate-bounce mb-2 opacity-80"></div>
+                        <span class="text-[11px] font-bold tracking-wider text-white drop-shadow-md" id="mock-video-title">DESERT - DAY</span>
+                        <span class="text-[9px] text-white/70 font-mono mt-0.5 max-w-full truncate px-2" id="video-path">path</span>
+                    </div>
+
+                    <!-- 除錯外框標籤 (浮動於上方) -->
+                    <div class="debug-label bg-yellow-500 text-slate-950 font-mono text-[10px] px-1.5 py-0.5 rounded shadow">
+                        videoPlayer (底層)
+                    </div>
+                </div>
+
+                <!-- 2. roomImage：中間層，完整覆蓋在影片上方 (視窗應挖空透明) -->
+                <div id="room-image" class="absolute pointer-events-none select-none z-20 transition-all">
+                    <!-- 實際房間圖 -->
+                    <img id="room-image-img" class="w-full h-full object-fill" src="" alt="Room Container BG">
+                    
+                    <!-- 圖片缺席時的精緻視覺模擬器 -->
+                    <div id="room-image-placeholder" class="hidden absolute inset-0 bg-slate-900/60 backdrop-blur-[1px] border border-dashed border-purple-500 flex flex-col items-center justify-center p-4">
+                        <div class="w-16 h-16 opacity-30 text-purple-400 mb-2">
+                            <!-- SVG 房屋圖示 -->
+                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
+                        </div>
+                        <p class="text-sm font-bold text-purple-300">主視覺房間層 (roomImage)</p>
+                        <p class="text-[10px] text-purple-400/80 font-mono mt-1" id="room-image-path">path</p>
+                    </div>
+
+                    <!-- 除錯外框標籤 (浮動於上方) -->
+                    <div class="debug-label bg-purple-600 text-white font-mono text-[10px] px-1.5 py-0.5 rounded shadow">
+                        roomImage (中層)
+                    </div>
+                </div>
+
+                <!-- 3. switch：最上層互動元素 - 切換日夜 (day/night) -->
+                <div id="switch-btn" class="absolute cursor-pointer select-none z-30 transition-all hover:scale-105 active:scale-95 group">
+                    <img id="switch-img" class="w-full h-full object-contain" src="" alt="Switch">
+                    
+                    <!-- 圖片缺席時的 Mock 按鈕 -->
+                    <div id="switch-placeholder" class="hidden absolute inset-0 bg-red-600/90 border border-red-400 rounded-lg flex flex-col items-center justify-center text-center p-1 shadow-lg text-white">
+                        <span class="text-[9px] font-bold">SWITCH</span>
+                        <div class="w-4 h-4 bg-white/30 rounded-full my-1 flex items-center justify-center text-[8px] font-mono">💡</div>
+                        <span class="text-[8px] opacity-75 truncate max-w-full" id="switch-path">path</span>
+                    </div>
+
+                    <!-- 亮色微光特效 -->
+                    <div class="absolute inset-0 rounded-full bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
+
+                    <!-- 除錯外框標籤 (浮動於上方) -->
+                    <div class="debug-label bg-red-500 text-white font-mono text-[10px] px-1.5 py-0.5 rounded shadow">
+                        switch (開關)
+                    </div>
+                </div>
+
+                <!-- 4. doorHandle：最上層互動元素 - 切換景點 (desert/ice) -->
+                <div id="door-handle-btn" class="absolute cursor-pointer select-none z-30 transition-all hover:brightness-110">
+                    <img id="door-handle-img" class="w-full h-full object-contain" src="" alt="Door Handle">
+                    
+                    <!-- 圖片缺席時的 Mock 按鈕 -->
+                    <div id="door-handle-placeholder" class="hidden absolute inset-0 bg-green-600/90 border border-green-400 rounded-md flex flex-col items-center justify-center text-center p-1 shadow-lg text-white">
+                        <span class="text-[9px] font-bold">DOOR HANDLE</span>
+                        <span class="text-[8px] text-green-200 mt-1 font-mono">🚪 CLICK</span>
+                        <span class="text-[8px] opacity-75 truncate max-w-full mt-0.5" id="door-handle-path">path</span>
+                    </div>
+
+                    <!-- 除錯外框標籤 (浮動於上方) -->
+                    <div class="debug-label bg-green-500 text-white font-mono text-[10px] px-1.5 py-0.5 rounded shadow">
+                        doorHandle (門把)
+                    </div>
+                </div>
+
+                <!-- 5. pointer：最上層裝飾/互動元素 - 指針 (旋轉指向狀態) -->
+                <div id="pointer-img" class="absolute pointer-events-none select-none z-30 transition-all" style="transition-property: transform, left, top, width, height;">
+                    <img id="pointer-img-img" class="w-full h-full object-contain" src="" alt="Pointer">
+                    
+                    <!-- 圖片缺席時的 Mock 指針 -->
+                    <div id="pointer-placeholder" class="hidden absolute inset-0 bg-orange-600/90 border border-orange-400 rounded-full flex flex-col items-center justify-center text-center p-1 shadow-lg text-white">
+                        <div class="w-full h-0.5 bg-white relative">
+                            <div class="absolute -right-1 -top-1 w-2.5 h-2.5 bg-yellow-300 rotate-45 border-t border-r border-white"></div>
+                        </div>
+                        <span class="text-[8px] font-mono mt-1">POINTER</span>
+                        <span class="text-[7px] opacity-75 truncate max-w-full" id="pointer-path">path</span>
+                    </div>
+
+                    <!-- 除錯外框標籤 (浮動於上方) -->
+                    <div class="debug-label bg-orange-500 text-white font-mono text-[10px] px-1.5 py-0.5 rounded shadow">
+                        pointer (指針)
+                    </div>
+                </div>
+
+                <!-- 6. musicBox：音樂播放器底座 (主點擊物件，z-index 提高為 30 確保在房圖之上) -->
+                <div id="music-box-btn" class="absolute cursor-pointer select-none z-30 transition-all hover:scale-105 active:scale-95 group">
+                    <img id="music-box-img" class="w-full h-full object-contain" src="" alt="Music Box">
+                    
+                    <!-- 圖片缺席時的 Mock 按鈕 -->
+                    <div id="music-box-placeholder" class="hidden absolute inset-0 bg-pink-600/90 border border-pink-400 rounded-lg flex flex-col items-center justify-center text-center p-1 shadow-lg text-white">
+                        <span class="text-[9px] font-bold" id="music-title">MUSIC BOX</span>
+                        <span class="text-[8px] text-pink-200 mt-1 font-mono">🔇 PAUSED</span>
+                    </div>
+
+                    <!-- 除錯外框標籤 (浮動於上方) -->
+                    <div class="debug-label bg-pink-500 text-white font-mono text-[10px] px-1.5 py-0.5 rounded shadow">
+                        musicBox (底座)
+                    </div>
+                </div>
+
+                <!-- 7. musicNote：浮動音符 (疊於底座最上方，z-index 使用 Tailwind 的 z-[35] 確保層級不遺失) -->
+                <div id="music-note-img" class="absolute pointer-events-none select-none z-[35]" style="transition-property: left, top, width, height;">
+                    <img id="music-note-img-img" class="w-full h-full object-contain" src="" alt="Music Note">
+                    
+                    <!-- 圖片缺席時的 Mock 音符 -->
+                    <div id="music-note-placeholder" class="hidden absolute inset-0 bg-blue-600/90 border border-blue-400 rounded-full flex flex-col items-center justify-center text-center p-1 shadow-lg text-white">
+                        <span class="text-[12px] font-bold">🎵</span>
+                    </div>
+
+                    <!-- 除錯外框標籤 (浮動於上方) -->
+                    <div class="debug-label bg-blue-500 text-white font-mono text-[10px] px-1.5 py-0.5 rounded shadow">
+                        musicNote (音符)
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- 底部主控提示/日誌紀錄 -->
+        <div class="bg-slate-900 border border-slate-800 rounded-lg p-3 text-xs font-mono h-24 overflow-y-auto flex flex-col gap-1 text-slate-400" id="console-logs">
+            <div class="text-emerald-400 font-semibold">[系統初始化] 歡迎使用奇幻房間網頁定位 Prototype 系統。</div>
+            <div class="text-blue-400">[提示] 影片與圖片已被設定為自動載入 Mock Placeholder，當您放入真實素材即可完美接軌。</div>
+        </div>
+    </div>
+
+
+    <!-- 右半邊：定位參數配置與除錯控制面板 -->
+    <div class="w-full lg:w-[420px] bg-slate-900 border-t lg:border-t-0 lg:border-l border-slate-800 flex flex-col h-auto lg:h-screen overflow-y-auto">
+        
+        <!-- 面板頂部資訊 -->
+        <div class="p-4 border-b border-slate-800 bg-slate-900/50 sticky top-0 backdrop-blur z-40">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">控制面板 CONTROLS</span>
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">LIVE EDIT</span>
+            </div>
+        </div>
+
+        <!-- 開關設定區 -->
+        <div class="p-4 border-b border-slate-800 flex flex-col gap-3 bg-slate-900/30">
+            <h3 class="text-xs font-bold text-slate-300 uppercase">除錯與視野工具</h3>
+            
+            <div class="grid grid-cols-2 gap-3">
+                <!-- Toggle Debug Button -->
+                <button id="toggle-debug-btn" class="flex items-center justify-center gap-2 px-3 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-bold transition-all shadow-sm">
+                    <span class="inline-block w-2.5 h-2.5 rounded-full bg-white" id="debug-dot"></span>
+                    <span>切換除錯框線 (ON)</span>
+                </button>
+
+                <!-- Reset Config Button -->
+                <button id="reset-btn" class="flex items-center justify-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-bold transition-all">
+                    <span>🔄 重設回初始 CONFIG</span>
+                </button>
+            </div>
+
+            <!-- Room Image Opacity Slider -->
+            <div class="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                <div class="flex justify-between items-center mb-1">
+                    <label class="text-xs text-slate-300">房間透明度 (方便觀察底層影片位置)</label>
+                    <span class="text-xs text-cyan-400 font-mono font-bold" id="opacity-val">100%</span>
+                </div>
+                <input type="range" id="room-opacity-range" class="w-full cursor-pointer" min="0" max="100" value="100" step="1">
+            </div>
+        </div>
+
+        <!-- 快速狀態切換按鈕 -->
+        <div class="p-4 border-b border-slate-800 flex flex-col gap-2">
+            <h3 class="text-xs font-bold text-slate-300 uppercase">快速測試互動狀態</h3>
+            <div class="grid grid-cols-2 gap-2">
+                <div class="flex flex-col gap-1">
+                    <span class="text-[10px] text-slate-500">時段 (Time)</span>
+                    <div class="flex bg-slate-950 p-1 rounded-md border border-slate-800">
+                        <button id="btn-set-day" class="flex-1 py-1 rounded text-xs font-semibold bg-sky-500 text-white">白天</button>
+                        <button id="btn-set-night" class="flex-1 py-1 rounded text-xs font-semibold text-slate-400">夜晚</button>
+                    </div>
+                </div>
+                <div class="flex flex-col gap-1">
+                    <span class="text-[10px] text-slate-500">窗外風景 (Scene)</span>
+                    <div class="flex bg-slate-950 p-1 rounded-md border border-slate-800">
+                        <button id="btn-set-desert" class="flex-1 py-1 rounded text-xs font-semibold bg-orange-600 text-white">沙漠</button>
+                        <button id="btn-set-ice" class="flex-1 py-1 rounded text-xs font-semibold text-slate-400">冰原</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 主定位參數調整區 -->
+        <div class="p-4 border-b border-slate-800 flex-1 flex flex-col gap-4">
+            <div class="flex items-center justify-between">
+                <h3 class="text-xs font-bold text-slate-300 uppercase">定位微調控制器 (支援小數點)</h3>
+                <!-- 選擇要定位的目標 -->
+                <select id="element-select" class="bg-slate-950 border border-slate-700 text-cyan-400 text-xs font-bold rounded-lg px-2.5 py-1.5 focus:ring-1 focus:ring-cyan-500 focus:outline-none">
+                    <option value="videoPlayer">📹 1. 影片播放器 (videoPlayer)</option>
+                    <option value="roomImage">🖼️ 2. 房間底圖 (roomImage)</option>
+                    <option value="switch">💡 3. 電燈開關 (switch)</option>
+                    <option value="doorHandle">🚪 4. 門把元件 (doorHandle)</option>
+                    <option value="pointer">📌 5. 計量針 (pointer)</option>
+                    <option value="musicBox">🎵 6. 音樂底座 (musicBox)</option>
+                    <option value="musicNote">🎶 7. 浮動音符 (musicNote)</option>
+                </select>
+            </div>
+
+            <!-- 一般通用滑桿控制項目 -->
+            <div class="space-y-3.5 bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
+                
+                <!-- Left Control -->
+                <div>
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="text-xs text-slate-300 font-mono">水平位置 (left)</span>
+                        <div class="flex items-center gap-1.5">
+                            <input type="number" id="input-left" class="w-16 bg-slate-900 text-center text-xs font-mono py-0.5 border border-slate-700 rounded text-cyan-400 font-bold focus:outline-none" min="-50" max="150" step="0.01">
+                            <span class="text-xs text-slate-500">%</span>
+                        </div>
+                    </div>
+                    <input type="range" id="slider-left" class="w-full" min="-50" max="150" step="0.1">
+                </div>
+
+                <!-- Top Control -->
+                <div>
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="text-xs text-slate-300 font-mono">垂直位置 (top)</span>
+                        <div class="flex items-center gap-1.5">
+                            <input type="number" id="input-top" class="w-16 bg-slate-900 text-center text-xs font-mono py-0.5 border border-slate-700 rounded text-cyan-400 font-bold focus:outline-none" min="-50" max="150" step="0.01">
+                            <span class="text-xs text-slate-500">%</span>
+                        </div>
+                    </div>
+                    <input type="range" id="slider-top" class="w-full" min="-50" max="150" step="0.1">
+                </div>
+
+                <!-- Width Control -->
+                <div>
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="text-xs text-slate-300 font-mono">寬度大小 (width)</span>
+                        <div class="flex items-center gap-1.5">
+                            <input type="number" id="input-width" class="w-16 bg-slate-900 text-center text-xs font-mono py-0.5 border border-slate-700 rounded text-cyan-400 font-bold focus:outline-none" min="1" max="150" step="0.01">
+                            <span class="text-xs text-slate-500">%</span>
+                        </div>
+                    </div>
+                    <input type="range" id="slider-width" class="w-full" min="1" max="150" step="0.1">
+                </div>
+
+                <!-- Height Control (僅在 roomImage 適用) -->
+                <div id="height-control-group" class="hidden">
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="text-xs text-slate-300 font-mono">高度大小 (height)</span>
+                        <div class="flex items-center gap-1.5">
+                            <input type="number" id="input-height" class="w-16 bg-slate-900 text-center text-xs font-mono py-0.5 border border-slate-700 rounded text-cyan-400 font-bold focus:outline-none" min="1" max="150" step="0.01">
+                            <span class="text-xs text-slate-500">%</span>
+                        </div>
+                    </div>
+                    <input type="range" id="slider-height" class="w-full" min="1" max="150" step="0.1">
+                </div>
+
+                <!-- Volume Control (僅在 musicBox 適用) -->
+                <div id="volume-control-group" class="hidden">
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="text-xs text-slate-300 font-mono">播放器音量 (volume)</span>
+                        <div class="flex items-center gap-1.5">
+                            <input type="number" id="input-volume" class="w-16 bg-slate-900 text-center text-xs font-mono py-0.5 border border-slate-700 rounded text-cyan-400 font-bold focus:outline-none" min="0" max="1" step="0.01">
+                        </div>
+                    </div>
+                    <input type="range" id="slider-volume" class="w-full" min="0" max="1" step="0.01">
+                </div>
+
+                <!-- Music Note Animation Control (僅在 musicNote 適用) -->
+                <div id="music-note-anim-group" class="hidden space-y-3.5">
+                    <!-- floatAmp -->
+                    <div>
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="text-xs text-slate-300 font-mono">上下浮動幅度 (floatAmp)</span>
+                            <div class="flex items-center gap-1.5">
+                                <input type="number" id="input-float-amp" class="w-16 bg-slate-900 text-center text-xs font-mono py-0.5 border border-slate-700 rounded text-cyan-400 font-bold focus:outline-none" min="0" max="100" step="0.1">
+                                <span class="text-xs text-slate-500">px</span>
+                            </div>
+                        </div>
+                        <input type="range" id="slider-float-amp" class="w-full" min="0" max="100" step="0.5">
+                    </div>
+                    <!-- swayAmp -->
+                    <div>
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="text-xs text-slate-300 font-mono">左右搖晃幅度 (swayAmp)</span>
+                            <div class="flex items-center gap-1.5">
+                                <input type="number" id="input-sway-amp" class="w-16 bg-slate-900 text-center text-xs font-mono py-0.5 border border-slate-700 rounded text-cyan-400 font-bold focus:outline-none" min="0" max="100" step="0.1">
+                                <span class="text-xs text-slate-500">px</span>
+                            </div>
+                        </div>
+                        <input type="range" id="slider-sway-amp" class="w-full" min="0" max="100" step="0.5">
+                    </div>
+                    <!-- rotAmp -->
+                    <div>
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="text-xs text-slate-300 font-mono">旋轉幅度 (rotAmp)</span>
+                            <div class="flex items-center gap-1.5">
+                                <input type="number" id="input-rot-amp" class="w-16 bg-slate-900 text-center text-xs font-mono py-0.5 border border-slate-700 rounded text-cyan-400 font-bold focus:outline-none" min="0" max="180" step="0.1">
+                                <span class="text-xs text-slate-500">deg</span>
+                            </div>
+                        </div>
+                        <input type="range" id="slider-rot-amp" class="w-full" min="0" max="180" step="0.5">
+                    </div>
+                    <!-- speed -->
+                    <div>
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="text-xs text-slate-300 font-mono">動畫循環速度 (speed)</span>
+                            <div class="flex items-center gap-1.5">
+                                <input type="number" id="input-speed" class="w-16 bg-slate-900 text-center text-xs font-mono py-0.5 border border-slate-700 rounded text-cyan-400 font-bold focus:outline-none" min="0.1" max="10" step="0.01">
+                                <span class="text-xs text-slate-500">秒</span>
+                            </div>
+                        </div>
+                        <input type="range" id="slider-speed" class="w-full" min="0.1" max="10" step="0.05">
+                    </div>
+                </div>
+
+                <!-- Transform Origin (適用於 doorHandle, pointer, musicNote ) -->
+                <div id="origin-control-group" class="hidden">
+                    <div class="flex flex-col gap-1">
+                        <span class="text-xs text-slate-300 font-mono">旋轉中心點 (transform-origin)</span>
+                        <input type="text" id="input-origin" class="w-full bg-slate-900 px-2.5 py-1.5 text-xs font-mono border border-slate-700 rounded text-cyan-400 focus:outline-none focus:border-cyan-500" placeholder="例如: center center 或 65% 50%">
+                        <p class="text-[9px] text-slate-500">輸入 CSS transform-origin 的屬性值。</p>
+                    </div>
+                </div>
+
+                <!-- Pointer Rotation (僅適用於 pointer) -->
+                <div id="pointer-rotation-group" class="hidden space-y-3">
+                    <div>
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="text-xs text-slate-300 font-mono">沙漠場景旋轉角度 (desertRotation)</span>
+                            <div class="flex items-center gap-1.5">
+                                <input type="number" id="input-desert-rot" class="w-16 bg-slate-900 text-center text-xs font-mono py-0.5 border border-slate-700 rounded text-cyan-400 font-bold focus:outline-none" min="-360" max="360" step="0.1">
+                                <span class="text-xs text-slate-500">deg</span>
+                            </div>
+                        </div>
+                        <input type="range" id="slider-desert-rot" class="w-full" min="-360" max="360" step="0.5">
+                    </div>
+                    <div>
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="text-xs text-slate-300 font-mono">冰原場景旋轉角度 (iceRotation)</span>
+                            <div class="flex items-center gap-1.5">
+                                <input type="number" id="input-ice-rot" class="w-16 bg-slate-900 text-center text-xs font-mono py-0.5 border border-slate-700 rounded text-cyan-400 font-bold focus:outline-none" min="-360" max="360" step="0.1">
+                                <span class="text-xs text-slate-500">deg</span>
+                            </div>
+                        </div>
+                        <input type="range" id="slider-ice-rot" class="w-full" min="-360" max="360" step="0.5">
+                    </div>
+                </div>
+
+                <!-- Door Handle Rotation (僅適用於 doorHandle) -->
+                <div id="door-rotation-group" class="hidden">
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="text-xs text-slate-300 font-mono">點擊反彈幅度 (clickRotation)</span>
+                        <div class="flex items-center gap-1.5">
+                            <input type="number" id="input-click-rot" class="w-16 bg-slate-900 text-center text-xs font-mono py-0.5 border border-slate-700 rounded text-cyan-400 font-bold focus:outline-none" min="-90" max="90" step="0.1">
+                            <span class="text-xs text-slate-500">deg</span>
+                        </div>
+                    </div>
+                    <input type="range" id="slider-click-rot" class="w-full" min="-90" max="90" step="0.5">
+                </div>
+
+                <!-- Video Aspect Ratio & Object Fit -->
+                <div id="video-config-group" class="hidden space-y-3">
+                    <div>
+                        <span class="text-xs text-slate-300 font-mono block mb-1">畫面填滿模式 (objectFit)</span>
+                        <select id="select-object-fit" class="w-full bg-slate-900 border border-slate-700 text-xs font-mono text-cyan-400 rounded-lg px-2.5 py-1.5 focus:outline-none">
+                            <option value="cover">cover (裁切填滿 - 推薦)</option>
+                            <option value="contain">contain (完整顯示 - 有黑邊)</option>
+                            <option value="fill">fill (強制拉伸)</option>
+                        </select>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- 頁面/整體通用調整 -->
+            <div class="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-2">
+                <h4 class="text-xs font-bold text-slate-400 uppercase">房間最大寬度 (maxRoomWidth)</h4>
+                <div class="flex items-center gap-3">
+                    <input type="range" id="slider-max-width" class="flex-1" min="600" max="2560" step="10" value="1400">
+                    <div class="flex items-center gap-1">
+                        <input type="number" id="input-max-width" class="w-20 bg-slate-900 text-center text-xs font-mono py-1 border border-slate-700 rounded text-cyan-400 font-bold" min="600" max="2560" value="1400">
+                        <span class="text-[10px] text-slate-500">px</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- CONFIG 導出與儲存面板 -->
+        <div class="p-4 bg-slate-950 border-t border-slate-800 flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-bold text-slate-300 uppercase">配置 CONFIG.JS</span>
+                <div class="flex gap-2">
+                    <button id="import-btn" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded transition-all shadow active:scale-95">
+                        📥 匯入/套用配置
+                    </button>
+                    <button id="copy-btn" class="px-2.5 py-1 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded transition-all shadow active:scale-95">
+                        📋 複製配置
+                    </button>
+                </div>
+            </div>
+            
+            <textarea id="config-output" class="w-full h-40 bg-slate-900 border border-slate-800 rounded p-2 text-[11px] font-mono text-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500 resize-none" placeholder="在此貼上您的 CONFIG 代碼..."></textarea>
+            <p class="text-[10px] text-slate-500 leading-relaxed">
+                ※ 您可以直接在上方貼上修改過的 CONFIG 並點擊「📥 匯入/套用配置」載入設定。
+            </p>
+        </div>
+
+    </div>
+
+    <!-- ========================================== -->
+    <!-- JAVASCRIPT 全功能邏輯處理                    -->
+    <!-- ========================================== -->
+    <script>
+        /************************************************************
+         * 1. 集中式資源與資產路徑配置 (ASSETS)
+         * -> [ 包含音樂素材、播放器底座及音符的日夜雙版素材 ]
+         ************************************************************/
+        const ASSETS = {
+            room: {
+                day: "assets/room-day_2560x1440.png",
+                night: "assets/room-night_2560x1440.png"
+            },
+            videos: {
+                desert: {
+                    day: "assets/desert-day.mp4",
+                    night: "assets/desert-night.mp4"
+                },
+                ice: {
+                    day: "assets/ice-day.mp4",
+                    night: "assets/ice-night.mp4"
+                }
+            },
+            switch: {
+                day: "assets/switch-day_400x600.png",
+                night: "assets/switch-night_400x600.png"
+            },
+            doorHandle: {
+                day: "assets/door_handle-day_800x400.png",
+                night: "assets/door_handle-night_800x400.png"
+            },
+            pointer: {
+                day: "assets/pointer-day_800X800.png",
+                night: "assets/pointer-night_800X800.png"
+            },
+            music: {
+                desert: "assets/desert-music.mp3",
+                ice: "assets/ice-music.mp3"
+            },
+            musicBox: {
+                day: "assets/music_box-day.png",
+                night: "assets/music_box-night.png"
+            },
+            musicNote: {
+                day: "assets/music_note-day.png",
+                night: "assets/music_note-night.png"
+            }
+        };
+
+        /************************************************************
+         * 2. 初始與控制組 CONFIG 參數 (支援音樂底座、音符及其動畫參數)
+         ************************************************************/
+        const DEFAULT_CONFIG = {
+            page: {
+                maxRoomWidth: 1400
+            },
+            roomImage: {
+                left: 0,
+                top: 0,
+                width: 100,
+                height: 100
+            },
+            videoPlayer: {
+                left: 23,
+                top: 16,
+                width: 43,
+                aspectRatio: 16 / 9,
+                objectFit: "cover"
+            },
+            switch: {
+                left: 8,
+                top: 36,
+                width: 4
+            },
+            doorHandle: {
+                left: 77,
+                top: 55,
+                width: 7,
+                transformOrigin: "65% 50%",
+                clickRotation: 15
+            },
+            pointer: {
+                left: 75,
+                top: 12,
+                width: 6,
+                transformOrigin: "center center",
+                desertRotation: 0,
+                iceRotation: 90
+            },
+            musicBox: {
+                left: 8,
+                top: 72,
+                width: 8,
+                volume: 0.5 // 初始音量設定為 0.5
+            },
+            musicNote: {
+                left: 10.5,
+                top: 62,
+                width: 3.5,
+                transformOrigin: "center center",
+                floatAmp: 10,   // 上下浮動幅度 (px)
+                swayAmp: 8,     // 左右搖晃幅度 (px)
+                rotAmp: 12,     // 旋轉幅度 (deg)
+                speed: 2.0      // 動畫播放速度 (秒)
+            }
+        };
+
+        // 複製一份工作用 CONFIG
+        let CONFIG = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+
+        let debugMode = true; // 預設開啟除錯外框與標籤
+        
+        let currentState = {
+            time: "day",      // 'day' 或 'night'
+            scene: "desert"   // 'desert' 或 'ice'
+        };
+
+        // 初始化音樂播放對象
+        let audioObj = new Audio();
+        audioObj.loop = true;
+        let isMusicPlaying = false; // 預設開網頁時「不」自動播放
+
+        // 日誌紀錄系統
+        function log(message, type = "info") {
+            const logsEl = document.getElementById('console-logs');
+            const timeStr = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+            
+            let colorClass = "text-slate-400";
+            if (type === "success") colorClass = "text-emerald-400 font-semibold";
+            if (type === "warning") colorClass = "text-yellow-400";
+            if (type === "error") colorClass = "text-rose-400 font-bold";
+            if (type === "action") colorClass = "text-cyan-400";
+
+            const logItem = document.createElement('div');
+            logItem.className = colorClass;
+            logItem.innerHTML = `[${timeStr}] ${message}`;
+            logsEl.appendChild(logItem);
+            logsEl.scrollTop = logsEl.scrollHeight;
+        }
+
+        /************************************************************
+         * 4. 畫面排版渲染更新
+         ************************************************************/
+        function applyStyles() {
+            // A. Room Container
+            const container = document.getElementById('room-container');
+            container.style.maxWidth = `${CONFIG.page.maxRoomWidth}px`;
+
+            // B. roomImage
+            const roomImg = document.getElementById('room-image');
+            roomImg.style.left = `${CONFIG.roomImage.left}%`;
+            roomImg.style.top = `${CONFIG.roomImage.top}%`;
+            roomImg.style.width = `${CONFIG.roomImage.width}%`;
+            roomImg.style.height = `${CONFIG.roomImage.height}%`;
+
+            // C. videoPlayer (16:9 高度由 aspectRatio 鎖定)
+            const videoPl = document.getElementById('video-player');
+            videoPl.style.left = `${CONFIG.videoPlayer.left}%`;
+            videoPl.style.top = `${CONFIG.videoPlayer.top}%`;
+            videoPl.style.width = `${CONFIG.videoPlayer.width}%`;
+            videoPl.style.aspectRatio = `${CONFIG.videoPlayer.aspectRatio}`;
+            
+            const videoEl = document.getElementById('room-video');
+            videoEl.style.objectFit = CONFIG.videoPlayer.objectFit;
+
+            // D. switch
+            const switchEl = document.getElementById('switch-btn');
+            switchEl.style.left = `${CONFIG.switch.left}%`;
+            switchEl.style.top = `${CONFIG.switch.top}%`;
+            switchEl.style.width = `${CONFIG.switch.width}%`;
+            if (CONFIG.switch.height) {
+                switchEl.style.height = `${CONFIG.switch.height}%`;
+            } else {
+                switchEl.style.height = 'auto';
+            }
+
+            // E. doorHandle
+            const doorEl = document.getElementById('door-handle-btn');
+            doorEl.style.left = `${CONFIG.doorHandle.left}%`;
+            doorEl.style.top = `${CONFIG.doorHandle.top}%`;
+            doorEl.style.width = `${CONFIG.doorHandle.width}%`;
+            if (CONFIG.doorHandle.height) {
+                doorEl.style.height = `${CONFIG.doorHandle.height}%`;
+            } else {
+                doorEl.style.height = 'auto';
+            }
+            doorEl.style.transformOrigin = CONFIG.doorHandle.transformOrigin;
+            doorEl.style.setProperty('--click-rotation', `${CONFIG.doorHandle.clickRotation}deg`);
+
+            // F. pointer
+            const pointerEl = document.getElementById('pointer-img');
+            pointerEl.style.left = `${CONFIG.pointer.left}%`;
+            pointerEl.style.top = `${CONFIG.pointer.top}%`;
+            pointerEl.style.width = `${CONFIG.pointer.width}%`;
+            if (CONFIG.pointer.height) {
+                pointerEl.style.height = `${CONFIG.pointer.height}%`;
+            } else {
+                pointerEl.style.height = 'auto';
+            }
+            pointerEl.style.transformOrigin = CONFIG.pointer.transformOrigin;
+            
+            // G. musicBox (底座)
+            const musicBoxEl = document.getElementById('music-box-btn');
+            musicBoxEl.style.left = `${CONFIG.musicBox.left}%`;
+            musicBoxEl.style.top = `${CONFIG.musicBox.top}%`;
+            musicBoxEl.style.width = `${CONFIG.musicBox.width}%`;
+
+            // H. musicNote (浮動音符)
+            const musicNoteEl = document.getElementById('music-note-img');
+            musicNoteEl.style.left = `${CONFIG.musicNote.left}%`;
+            musicNoteEl.style.top = `${CONFIG.musicNote.top}%`;
+            musicNoteEl.style.width = `${CONFIG.musicNote.width}%`;
+            musicNoteEl.style.transformOrigin = CONFIG.musicNote.transformOrigin;
+
+            // 動態調整音符的動畫 CSS 自訂屬性
+            musicNoteEl.style.setProperty('--float-amp', CONFIG.musicNote.floatAmp);
+            musicNoteEl.style.setProperty('--sway-amp', CONFIG.musicNote.swayAmp);
+            musicNoteEl.style.setProperty('--rot-amp', CONFIG.musicNote.rotAmp);
+            musicNoteEl.style.setProperty('--anim-speed', `${CONFIG.musicNote.speed}s`);
+
+            // 更新指針角度
+            updatePointerAngle();
+
+            // 更新文本輸出 (如果文本框此時不是聚焦狀態，才主動更新它以免影響使用者編輯)
+            if (document.activeElement !== document.getElementById('config-output')) {
+                renderConfigJSON();
+            }
+        }
+
+        // 更新指針角度
+        function updatePointerAngle() {
+            const pointerEl = document.getElementById('pointer-img');
+            const targetRotation = currentState.scene === "desert" 
+                ? CONFIG.pointer.desertRotation 
+                : CONFIG.pointer.iceRotation;
+            pointerEl.style.transform = `rotate(${targetRotation}deg)`;
+        }
+
+        /************************************************************
+         * 5. 素材資源切換與音樂播放邏輯
+         ************************************************************/
+        function updateAssetsAndMedia() {
+            const time = currentState.time;
+            const scene = currentState.scene;
+
+            // 更新狀態 Badge UI
+            const bTime = document.getElementById('badge-time');
+            bTime.textContent = time.toUpperCase();
+            if (time === "day") {
+                bTime.className = "px-2.5 py-1 rounded-full bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 font-bold uppercase transition-all";
+            } else {
+                bTime.className = "px-2.5 py-1 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-bold uppercase transition-all";
+            }
+
+            const bScene = document.getElementById('badge-scene');
+            bScene.textContent = scene.toUpperCase();
+            if (scene === "desert") {
+                bScene.className = "px-2.5 py-1 rounded-full bg-orange-500/10 text-orange-400 border border-orange-500/20 font-bold uppercase transition-all";
+            } else {
+                bScene.className = "px-2.5 py-1 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-bold uppercase transition-all";
+            }
+
+            // 更新圖片 Source 以及對應的 Mock Text
+            document.getElementById('room-image-img').src = ASSETS.room[time];
+            document.getElementById('room-image-path').textContent = ASSETS.room[time];
+
+            document.getElementById('switch-img').src = ASSETS.switch[time];
+            document.getElementById('switch-path').textContent = ASSETS.switch[time];
+
+            document.getElementById('door-handle-img').src = ASSETS.doorHandle[time];
+            document.getElementById('door-handle-path').textContent = ASSETS.doorHandle[time];
+
+            document.getElementById('pointer-img-img').src = ASSETS.pointer[time];
+            document.getElementById('pointer-path').textContent = ASSETS.pointer[time];
+
+            // 支援日夜切換音樂播放器底座與音符 (musicBox 與 musicNote 日夜切換)
+            document.getElementById('music-box-img').src = ASSETS.musicBox[time];
+            document.getElementById('music-note-img-img').src = ASSETS.musicNote[time];
+
+            // 影片播放器與模擬背景淡入淡出處理
+            const videoEl = document.getElementById('room-video');
+            const placeholderEl = document.getElementById('video-placeholder');
+            const targetVideoPath = ASSETS.videos[scene][time];
+            
+            placeholderEl.style.opacity = '1';
+            placeholderEl.style.pointerEvents = 'auto';
+            placeholderEl.style.display = 'flex';
+
+            if (videoEl.getAttribute('data-active-src') !== targetVideoPath) {
+                videoEl.setAttribute('data-active-src', targetVideoPath);
+                videoEl.src = targetVideoPath;
+                videoEl.load();
+                
+                videoEl.play().then(() => {
+                    placeholderEl.style.opacity = '0';
+                    placeholderEl.style.pointerEvents = 'none';
+                    setTimeout(() => {
+                        if (placeholderEl.style.opacity === '0') {
+                            placeholderEl.style.display = 'none';
+                        }
+                    }, 300);
+                }).catch(e => {
+                    console.log("影音自動播放受阻或找不到。");
+                });
+            } else {
+                if (!videoEl.paused) {
+                    placeholderEl.style.opacity = '0';
+                    placeholderEl.style.pointerEvents = 'none';
+                    placeholderEl.style.display = 'none';
+                }
+            }
+
+            document.getElementById('video-path').textContent = targetVideoPath;
+            updateMockBackgrounds(scene, time);
+        }
+
+        // 音樂播放與暫停核心函式
+        function playMusic() {
+            const currentScene = currentState.scene;
+            const targetMusicPath = ASSETS.music[currentScene];
+
+            // 檢查音樂來源是否需要更新，若不同則重載
+            const isDifferentSource = !audioObj.src.endsWith(targetMusicPath);
+            if (isDifferentSource) {
+                audioObj.src = targetMusicPath;
+            }
+
+            // 安全性修正：防止量值遺失或為 NaN
+            const safeVolume = (CONFIG.musicBox && typeof CONFIG.musicBox.volume === 'number' && !isNaN(CONFIG.musicBox.volume)) ? CONFIG.musicBox.volume : 0.5;
+            audioObj.volume = safeVolume;
+            
+            audioObj.play().then(() => {
+                isMusicPlaying = true;
+                // 音符套用 CSS 動態 keyframes 動畫
+                document.getElementById('music-note-img').classList.add('music-playing');
+                document.getElementById('music-box-placeholder').querySelector('span:nth-child(2)').textContent = "🎵 PLAYING";
+                
+                log(`🔊 音樂正在播放: [ ${currentScene.toUpperCase()} ] 專屬配樂 (音量: ${safeVolume})`);
+            }).catch(e => {
+                isMusicPlaying = false;
+                document.getElementById('music-note-img').classList.remove('music-playing');
+                document.getElementById('music-box-placeholder').querySelector('span:nth-child(2)').textContent = "🔇 PAUSED";
+                log(`⚠️ 瀏覽器阻止了音訊自動播放 (或本機未放置音樂檔 ${targetMusicPath})，請點擊底座手動啟動。`, "warning");
+            });
+        }
+
+        function pauseMusic() {
+            audioObj.pause();
+            isMusicPlaying = false;
+            // 音符停止動畫
+            document.getElementById('music-note-img').classList.remove('music-playing');
+            document.getElementById('music-box-placeholder').querySelector('span:nth-child(2)').textContent = "🔇 PAUSED";
+            
+            log("🔇 音樂已暫停播放");
+        }
+
+        // 素材失敗處理 (當 assets 找不到時顯示 placeholder)
+        function initFallbackHandlers() {
+            const elements = [
+                { imgId: 'room-image-img', mockId: 'room-image-placeholder' },
+                { imgId: 'switch-img', mockId: 'switch-placeholder' },
+                { imgId: 'door-handle-img', mockId: 'door-handle-placeholder' },
+                { imgId: 'pointer-img-img', mockId: 'pointer-placeholder' },
+                { imgId: 'music-box-img', mockId: 'music-box-placeholder' },
+                { imgId: 'music-note-img-img', mockId: 'music-note-placeholder' }
+            ];
+
+            elements.forEach(item => {
+                const img = document.getElementById(item.imgId);
+                const mock = document.getElementById(item.mockId);
+                
+                img.onerror = () => {
+                    img.classList.add('hidden');
+                    mock.classList.remove('hidden');
+                };
+                img.onload = () => {
+                    img.classList.remove('hidden');
+                    mock.classList.add('hidden');
+                };
+            });
+
+            // 監聽影片成功播放與載入失敗
+            const videoEl = document.getElementById('room-video');
+            const placeholderEl = document.getElementById('video-placeholder');
+            
+            videoEl.addEventListener('playing', () => {
+                placeholderEl.style.opacity = '0';
+                placeholderEl.style.pointerEvents = 'none';
+                setTimeout(() => {
+                    if (placeholderEl.style.opacity === '0') {
+                        placeholderEl.style.display = 'none';
+                    }
+                }, 300);
+            });
+            
+            videoEl.addEventListener('error', () => {
+                placeholderEl.style.opacity = '1';
+                placeholderEl.style.pointerEvents = 'auto';
+                placeholderEl.style.display = 'flex';
+            });
+        }
+
+        // 更新模擬用漸層
+        function updateMockBackgrounds(scene, time) {
+            const placeholder = document.getElementById('video-placeholder');
+            const skyElement = document.getElementById('mock-sky-element');
+            const titleElement = document.getElementById('mock-video-title');
+
+            placeholder.className = "absolute inset-0 flex flex-col items-center justify-center text-center p-3 transition-opacity duration-300 ";
+            skyElement.className = "w-16 h-16 rounded-full blur-md animate-pulse mb-2 opacity-80 transition-all ";
+
+            titleElement.textContent = `${scene.toUpperCase()} - ${time.toUpperCase()}`;
+
+            if (scene === "desert") {
+                if (time === "day") {
+                    placeholder.classList.add("mock-desert-day");
+                    skyElement.classList.add("bg-yellow-300");
+                } else {
+                    placeholder.classList.add("mock-desert-night");
+                    skyElement.classList.add("bg-purple-300", "scale-75");
+                }
+            } else if (scene === "ice") {
+                if (time === "day") {
+                    placeholder.classList.add("mock-ice-day");
+                    skyElement.classList.add("bg-cyan-200");
+                } else {
+                    placeholder.classList.add("mock-ice-night");
+                    skyElement.classList.add("bg-teal-200", "scale-90");
+                }
+            }
+        }
+
+        /************************************************************
+         * 6. 控制面板與對話綁定 (支援小數點與音量、動畫參數微調)
+         ************************************************************/
+        const elSelect = document.getElementById('element-select');
+
+        elSelect.addEventListener('change', populateControlPanel);
+
+        function populateControlPanel() {
+            const selected = elSelect.value;
+            const cfg = CONFIG[selected];
+
+            document.getElementById('height-control-group').classList.toggle('hidden', selected !== 'roomImage');
+            document.getElementById('origin-control-group').classList.toggle('hidden', selected !== 'pointer' && selected !== 'doorHandle' && selected !== 'musicNote');
+            document.getElementById('pointer-rotation-group').classList.toggle('hidden', selected !== 'pointer');
+            document.getElementById('door-rotation-group').classList.toggle('hidden', selected !== 'doorHandle');
+            document.getElementById('video-config-group').classList.toggle('hidden', selected !== 'videoPlayer');
+            
+            // 音樂底座與音符微調器控制顯隱
+            document.getElementById('volume-control-group').classList.toggle('hidden', selected !== 'musicBox');
+            document.getElementById('music-note-anim-group').classList.toggle('hidden', selected !== 'musicNote');
+
+            // 載入當前數值並限制最多顯示兩位小數
+            document.getElementById('input-left').value = cfg.left;
+            document.getElementById('slider-left').value = cfg.left;
+
+            document.getElementById('input-top').value = cfg.top;
+            document.getElementById('slider-top').value = cfg.top;
+
+            document.getElementById('input-width').value = cfg.width;
+            document.getElementById('slider-width').value = cfg.width;
+
+            if (selected === 'roomImage') {
+                document.getElementById('input-height').value = cfg.height || 100;
+                document.getElementById('slider-height').value = cfg.height || 100;
+            }
+
+            if (selected === 'pointer' || selected === 'doorHandle' || selected === 'musicNote') {
+                document.getElementById('input-origin').value = cfg.transformOrigin || "center center";
+            }
+
+            if (selected === 'pointer') {
+                document.getElementById('input-desert-rot').value = cfg.desertRotation;
+                document.getElementById('slider-desert-rot').value = cfg.desertRotation;
+                document.getElementById('input-ice-rot').value = cfg.iceRotation;
+                document.getElementById('slider-ice-rot').value = cfg.iceRotation;
+            }
+
+            if (selected === 'doorHandle') {
+                document.getElementById('input-click-rot').value = cfg.clickRotation;
+                document.getElementById('slider-click-rot').value = cfg.clickRotation;
+            }
+
+            if (selected === 'videoPlayer') {
+                document.getElementById('select-object-fit').value = cfg.objectFit || "cover";
+            }
+
+            // 音量設定
+            if (selected === 'musicBox') {
+                document.getElementById('input-volume').value = cfg.volume;
+                document.getElementById('slider-volume').value = cfg.volume;
+            }
+
+            // 音符動畫設定
+            if (selected === 'musicNote') {
+                document.getElementById('input-float-amp').value = cfg.floatAmp;
+                document.getElementById('slider-float-amp').value = cfg.floatAmp;
+                document.getElementById('input-sway-amp').value = cfg.swayAmp;
+                document.getElementById('slider-sway-amp').value = cfg.swayAmp;
+                document.getElementById('input-rot-amp').value = cfg.rotAmp;
+                document.getElementById('slider-rot-amp').value = cfg.rotAmp;
+                document.getElementById('input-speed').value = cfg.speed;
+                document.getElementById('slider-speed').value = cfg.speed;
+            }
+        }
+
+        // 綁定輸入元件
+        function setupControlBindings() {
+            const bindings = [
+                { s: 'slider-left', i: 'input-left', key: 'left' },
+                { s: 'slider-top', i: 'input-top', key: 'top' },
+                { s: 'slider-width', i: 'input-width', key: 'width' },
+                { s: 'slider-height', i: 'input-height', key: 'height' },
+                { s: 'slider-desert-rot', i: 'input-desert-rot', key: 'desertRotation' },
+                { s: 'slider-ice-rot', i: 'input-ice-rot', key: 'iceRotation' },
+                { s: 'slider-click-rot', i: 'input-click-rot', key: 'clickRotation' },
+                // 音訊相關控制
+                { s: 'slider-volume', i: 'input-volume', key: 'volume' },
+                { s: 'slider-float-amp', i: 'input-float-amp', key: 'floatAmp' },
+                { s: 'slider-sway-amp', i: 'input-sway-amp', key: 'swayAmp' },
+                { s: 'slider-rot-amp', i: 'input-rot-amp', key: 'rotAmp' },
+                { s: 'slider-speed', i: 'input-speed', key: 'speed' }
+            ];
+
+            bindings.forEach(bind => {
+                const slider = document.getElementById(bind.s);
+                const input = document.getElementById(bind.i);
+
+                const update = (val) => {
+                    const selected = elSelect.value;
+                    let parsedVal = parseFloat(val);
+                    if (isNaN(parsedVal)) parsedVal = 0;
+                    
+                    // 精度裁切，最多保留小數兩位，確保 config 清爽
+                    parsedVal = Math.round(parsedVal * 100) / 100;
+
+                    CONFIG[selected][bind.key] = parsedVal;
+                    slider.value = parsedVal;
+                    input.value = parsedVal;
+
+                    // 如果音量有更動，即時同步目前音樂音量
+                    if (selected === 'musicBox' && bind.key === 'volume') {
+                        audioObj.volume = parsedVal;
+                    }
+
+                    applyStyles();
+                };
+
+                slider.addEventListener('input', (e) => update(e.target.value));
+                input.addEventListener('input', (e) => update(e.target.value));
+            });
+
+            // transformOrigin 變更
+            document.getElementById('input-origin').addEventListener('input', (e) => {
+                const selected = elSelect.value;
+                if (CONFIG[selected]) {
+                    CONFIG[selected].transformOrigin = e.target.value;
+                    applyStyles();
+                }
+            });
+
+            // select-object-fit 變更
+            document.getElementById('select-object-fit').addEventListener('change', (e) => {
+                CONFIG.videoPlayer.objectFit = e.target.value;
+                applyStyles();
+            });
+
+            // maxRoomWidth 專屬綁定
+            const maxWS = document.getElementById('slider-max-width');
+            const maxWI = document.getElementById('input-max-width');
+            const updateMaxWidth = (val) => {
+                CONFIG.page.maxRoomWidth = Number(val);
+                maxWS.value = val;
+                maxWI.value = val;
+                applyStyles();
+            };
+            maxWS.addEventListener('input', (e) => updateMaxWidth(e.target.value));
+            maxWI.addEventListener('input', (e) => updateMaxWidth(e.target.value));
+
+            // Room Opacity 房間不透明度控制
+            const opacityRange = document.getElementById('room-opacity-range');
+            opacityRange.addEventListener('input', (e) => {
+                const val = e.target.value;
+                document.getElementById('opacity-val').textContent = `${val}%`;
+                document.getElementById('room-image').style.opacity = val / 100;
+            });
+        }
+
+        /************************************************************
+         * 7. 互動事件：點擊 SWITCH、門把與音樂底座
+         ************************************************************/
+        function setupInteractiveEvents() {
+            
+            // A. 電燈開關 (switch) 點擊 -> 切換時段 (會同步切換音樂底座與音符圖片日夜版)
+            const switchBtn = document.getElementById('switch-btn');
+            switchBtn.addEventListener('click', () => {
+                currentState.time = currentState.time === "day" ? "night" : "day";
+                log(`點擊開關 switch: 切換時段為 [ ${currentState.time.toUpperCase()} ]`, "action");
+                updateAssetsAndMedia();
+                updateTestButtonsUI();
+            });
+
+            // B. 門把 (doorHandle) 點擊 -> 切換景點、指針與音樂（若播放中才同步）
+            const doorBtn = document.getElementById('door-handle-btn');
+            doorBtn.addEventListener('click', () => {
+                currentState.scene = currentState.scene === "desert" ? "ice" : "desert";
+                log(`點擊門把 doorHandle: 切換窗外景點為 [ ${currentState.scene.toUpperCase()} ]`, "action");
+                
+                // 播放回彈動態
+                doorBtn.classList.remove('door-active');
+                void doorBtn.offsetWidth; // 重啟 css keyframe 動作
+                doorBtn.classList.add('door-active');
+
+                // 更新資源與旋轉
+                updateAssetsAndMedia();
+                updatePointerAngle();
+                updateTestButtonsUI();
+
+                // 音樂與場景同步切換 (若正處於播放狀態則直接無縫更新播放新場景配樂，若暫停則不自動播放)
+                if (isMusicPlaying) {
+                    log(`🎶 音樂同步無縫更新至新場景: [ ${currentState.scene.toUpperCase()} ] 專屬音樂`, "action");
+                    playMusic();
+                }
+            });
+
+            // C. 點擊音樂底座 (musicBox) -> 播放/暫停控制
+            const musicBoxBtn = document.getElementById('music-box-btn');
+            musicBoxBtn.addEventListener('click', () => {
+                if (isMusicPlaying) {
+                    log(`🔊 使用者點擊底座: 觸發暫停音樂`, "action");
+                    pauseMusic();
+                } else {
+                    log(`🔊 使用者點擊底座: 觸發播放 [ ${currentState.scene.toUpperCase()} ] 配樂`, "action");
+                    playMusic();
+                }
+            });
+        }
+
+        function updateTestButtonsUI() {
+            const isDay = currentState.time === "day";
+            document.getElementById('btn-set-day').className = isDay ? "flex-1 py-1 rounded text-xs font-semibold bg-sky-500 text-white" : "flex-1 py-1 rounded text-xs font-semibold text-slate-400";
+            document.getElementById('btn-set-night').className = !isDay ? "flex-1 py-1 rounded text-xs font-semibold bg-indigo-600 text-white" : "flex-1 py-1 rounded text-xs font-semibold text-slate-400";
+
+            const isDesert = currentState.scene === "desert";
+            document.getElementById('btn-set-desert').className = isDesert ? "flex-1 py-1 rounded text-xs font-semibold bg-orange-600 text-white" : "flex-1 py-1 rounded text-xs font-semibold text-slate-400";
+            document.getElementById('btn-set-ice').className = !isDesert ? "flex-1 py-1 rounded text-xs font-semibold bg-cyan-500 text-white" : "flex-1 py-1 rounded text-xs font-semibold text-slate-400";
+        }
+
+        function setupStateTestButtons() {
+            document.getElementById('btn-set-day').addEventListener('click', () => {
+                currentState.time = "day";
+                log(`面板控制: 切換至 DAY`, "action");
+                updateAssetsAndMedia();
+                updateTestButtonsUI();
+            });
+            document.getElementById('btn-set-night').addEventListener('click', () => {
+                currentState.time = "night";
+                log(`面板控制: 切換至 NIGHT`, "action");
+                updateAssetsAndMedia();
+                updateTestButtonsUI();
+            });
+            document.getElementById('btn-set-desert').addEventListener('click', () => {
+                currentState.scene = "desert";
+                log(`面板控制: 切換至 DESERT`, "action");
+                updateAssetsAndMedia();
+                updatePointerAngle();
+                updateTestButtonsUI();
+                if (isMusicPlaying) playMusic();
+            });
+            document.getElementById('btn-set-ice').addEventListener('click', () => {
+                currentState.scene = "ice";
+                log(`面板控制: 切換至 ICE`, "action");
+                updateAssetsAndMedia();
+                updatePointerAngle();
+                updateTestButtonsUI();
+                if (isMusicPlaying) playMusic();
+            });
+        }
+
+        /************************************************************
+         * 8. 除錯模式 (Debug Mode) 處理
+         ************************************************************/
+        const toggleDebugBtn = document.getElementById('toggle-debug-btn');
+        const container = document.getElementById('room-container');
+
+        toggleDebugBtn.addEventListener('click', toggleDebugMode);
+
+        function toggleDebugMode() {
+            debugMode = !debugMode;
+            applyDebugModeUI();
+        }
+
+        function applyDebugModeUI() {
+            const dot = document.getElementById('debug-dot');
+            if (debugMode) {
+                container.classList.add('debug-enabled');
+                toggleDebugBtn.className = "flex items-center justify-center gap-2 px-3 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-bold transition-all shadow-md";
+                toggleDebugBtn.innerHTML = `<span class="inline-block w-2.5 h-2.5 rounded-full bg-white"></span> <span>切換除錯框線 (ON)</span>`;
+                log("除錯框線已開啟 (粉色框:musicBox | 藍色框:musicNote | 點擊穿透標籤)", "warning");
+            } else {
+                container.classList.remove('debug-enabled');
+                toggleDebugBtn.className = "flex items-center justify-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-lg text-xs font-bold transition-all";
+                toggleDebugBtn.innerHTML = `<span class="inline-block w-2.5 h-2.5 rounded-full bg-slate-600"></span> <span>切換除錯框線 (OFF)</span>`;
+                log("除錯框線已關閉");
+            }
+        }
+
+        /************************************************************
+         * 9. CONFIG 渲染與解析、匯入功能
+         ************************************************************/
+        function renderConfigJSON() {
+            const formatted = `const CONFIG = {
+  page: {
+    maxRoomWidth: ${CONFIG.page.maxRoomWidth}
+  },
+  roomImage: {
+    left: ${CONFIG.roomImage.left},
+    top: ${CONFIG.roomImage.top},
+    width: ${CONFIG.roomImage.width},
+    height: ${CONFIG.roomImage.height}
+  },
+  videoPlayer: {
+    left: ${CONFIG.videoPlayer.left},
+    top: ${CONFIG.videoPlayer.top},
+    width: ${CONFIG.videoPlayer.width},
+    aspectRatio: ${CONFIG.videoPlayer.aspectRatio},
+    objectFit: "${CONFIG.videoPlayer.objectFit}"
+  },
+  switch: {
+    left: ${CONFIG.switch.left},
+    top: ${CONFIG.switch.top},
+    width: ${CONFIG.switch.width}
+  },
+  doorHandle: {
+    left: ${CONFIG.doorHandle.left},
+    top: ${CONFIG.doorHandle.top},
+    width: ${CONFIG.doorHandle.width},
+    transformOrigin: "${CONFIG.doorHandle.transformOrigin}",
+    clickRotation: ${CONFIG.doorHandle.clickRotation}
+  },
+  pointer: {
+    left: ${CONFIG.pointer.left},
+    top: ${CONFIG.pointer.top},
+    width: ${CONFIG.pointer.width},
+    transformOrigin: "${CONFIG.pointer.transformOrigin}",
+    desertRotation: ${CONFIG.pointer.desertRotation},
+    iceRotation: ${CONFIG.pointer.iceRotation}
+  },
+  musicBox: {
+    left: ${CONFIG.musicBox.left},
+    top: ${CONFIG.musicBox.top},
+    width: ${CONFIG.musicBox.width},
+    volume: ${CONFIG.musicBox.volume}
+  },
+  musicNote: {
+    left: ${CONFIG.musicNote.left},
+    top: ${CONFIG.musicNote.top},
+    width: ${CONFIG.musicNote.width},
+    transformOrigin: "${CONFIG.musicNote.transformOrigin}",
+    floatAmp: ${CONFIG.musicNote.floatAmp},
+    swayAmp: ${CONFIG.musicNote.swayAmp},
+    rotAmp: ${CONFIG.musicNote.rotAmp},
+    speed: ${CONFIG.musicNote.speed}
+  }
+};`;
+
+            document.getElementById('config-output').value = formatted;
+        }
+
+        // 核心功能：解析輸入的配置代碼並動態套用 (新增：超強防錯安全遞迴合併)
+        function importConfig() {
+            const textarea = document.getElementById('config-output');
+            const code = textarea.value.trim();
+            
+            if (!code) {
+                log("請先在配置框中輸入您要套用的 CONFIG 代碼！", "error");
+                return;
+            }
+
+            try {
+                // 1. 清理變數宣告開頭
+                let cleanCode = code;
+                cleanCode = cleanCode.replace(/^(const|let|var)\s+CONFIG\s*=\s*/i, '');
+                
+                // 去除最後的結尾分號
+                if (cleanCode.endsWith(';')) {
+                    cleanCode = cleanCode.slice(0, -1);
+                }
+
+                // 2. 進行沙盒解構
+                const parsedObject = new Function(`return (${cleanCode});`)();
+
+                // 3. 驗證結構是否為有效物件
+                if (parsedObject && typeof parsedObject === 'object') {
+                    
+                    // 4. 【核心優化】：極致防錯深層合併 (Deep Merge)
+                    // 以當前畫面的「CONFIG」做為基底，而不是原始「DEFAULT_CONFIG」。
+                    // 這代表您如果貼上的 CONFIG 內沒有包含 musicBox 或 musicNote，
+                    // 系統會自動保留您當前在畫面上已經微調好的值，絕不強制還原！
+                    const mergedConfig = JSON.parse(JSON.stringify(CONFIG));
+                    
+                    function safeDeepMerge(target, source) {
+                        for (const key in source) {
+                            if (source.hasOwnProperty(key)) {
+                                if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+                                    // 遇到子物件是空物件 {} 時，安全跳過，使其完全保留內置的既有位置
+                                    if (Object.keys(source[key]).length === 0) {
+                                        continue;
+                                    }
+                                    if (!target[key] || typeof target[key] !== 'object') {
+                                        target[key] = {};
+                                    }
+                                    safeDeepMerge(target[key], source[key]);
+                                } else if (source[key] !== undefined && source[key] !== null) {
+                                    target[key] = source[key];
+                                }
+                            }
+                        }
+                    }
+
+                    safeDeepMerge(mergedConfig, parsedObject);
+
+                    // 5. 正式套用強健化之後的配置
+                    CONFIG = mergedConfig;
+
+                    // 6. 更新所有滑桿與頁面視覺
+                    applyStyles();
+                    populateControlPanel();
+                    
+                    // 同步最大寬度 Slider 的 UI 數值
+                    document.getElementById('slider-max-width').value = CONFIG.page.maxRoomWidth;
+                    document.getElementById('input-max-width').value = CONFIG.page.maxRoomWidth;
+
+                    // 同步背景音訊音量
+                    const safeVolume = (CONFIG.musicBox && typeof CONFIG.musicBox.volume === 'number') ? CONFIG.musicBox.volume : 0.5;
+                    audioObj.volume = safeVolume;
+                    
+                    // 如果原本正在播放，重整音源
+                    if (isMusicPlaying) {
+                        playMusic();
+                    }
+
+                    // 智慧語音提示缺少的設定金鑰，保障微調進度
+                    const keysInSource = Object.keys(parsedObject);
+                    const missingKeys = ['musicBox', 'musicNote'].filter(k => !keysInSource.includes(k));
+                    
+                    if (missingKeys.length > 0) {
+                        log(`📥 匯入成功！ℹ️ 提示：您的程式碼中缺少了 [ ${missingKeys.join(', ')} ]。系統已為您自動保留畫面上微調好的既有位置！`, "success");
+                    } else {
+                        log("📥 成功解析並套用外部 CONFIG！所有欄位與動畫參數已同步更新。", "success");
+                    }
+
+                    // 匯入成功的視覺反饋
+                    const importBtn = document.getElementById('import-btn');
+                    const origText = importBtn.textContent;
+                    importBtn.textContent = "✓ 已成功套用！";
+                    importBtn.className = "px-2.5 py-1 bg-emerald-700 text-white font-bold text-xs rounded transition-all";
+                    setTimeout(() => {
+                        importBtn.textContent = origText;
+                        importBtn.className = "px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded transition-all";
+                    }, 1500);
+
+                } else {
+                    throw new Error("解析格式並非有效的 JavaScript 物件。");
+                }
+
+            } catch (err) {
+                log(`❌ 匯入失敗！請確認格式是否無誤。詳細原因: ${err.message}`, "error");
+                console.error("匯入解析錯誤:", err);
+            }
+        }
+
+        // 綁定匯入按鈕 click
+        document.getElementById('import-btn').addEventListener('click', importConfig);
+
+        document.getElementById('copy-btn').addEventListener('click', () => {
+            const textarea = document.getElementById('config-output');
+            textarea.select();
+            textarea.setSelectionRange(0, 99999);
+            
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    log("📋 配置代碼已成功複製到剪貼簿！", "success");
+                    const copyBtn = document.getElementById('copy-btn');
+                    const origText = copyBtn.textContent;
+                    copyBtn.textContent = "✓ 已複製";
+                    copyBtn.className = "px-2.5 py-1 bg-emerald-600 text-white font-bold text-xs rounded transition-all";
+                    setTimeout(() => {
+                        copyBtn.textContent = origText;
+                        copyBtn.className = "px-2.5 py-1 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded transition-all";
+                    }, 1500);
+                } else {
+                    log("複製失敗，請手動複製。", "error");
+                }
+            } catch (err) {
+                log("複製失敗，請手動複製。", "error");
+            }
+        });
+
+        document.getElementById('reset-btn').addEventListener('click', () => {
+            CONFIG = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+            populateControlPanel();
+            applyStyles();
+            document.getElementById('slider-max-width').value = CONFIG.page.maxRoomWidth;
+            document.getElementById('input-max-width').value = CONFIG.page.maxRoomWidth;
+            audioObj.volume = CONFIG.musicBox.volume;
+            log("🔄 參數已成功還原為初始配置！", "warning");
+        });
+
+        /************************************************************
+         * 10. 網頁啟動初始化
+         ************************************************************/
+        window.onload = function () {
+            initFallbackHandlers();
+            populateControlPanel();
+            setupControlBindings();
+            setupInteractiveEvents();
+            setupStateTestButtons();
+            
+            applyStyles();
+            updateAssetsAndMedia();
+            applyDebugModeUI();
+
+            // 網頁首次點擊時，協助解鎖瀏覽器的音訊限制政策
+            window.addEventListener('click', () => {
+                if (isMusicPlaying && audioObj.paused) {
+                    audioObj.play().catch(() => {});
+                }
+            }, { once: true });
+
+            log("👍 調整定位專用 Prototype 已成功啟用！雙層音樂播放器、EQ跳動模組與防塌陷機制運作中。");
+        }
+    </script>
+</body>
+</html>

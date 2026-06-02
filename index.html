@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>奇幻房間 Fantasy Room</title>
+    <!-- 使用 Tailwind CSS 進行基礎排版 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* ============================================================
+         * 1. 基礎展示頁面樣式 (滿版無留白覆蓋)
+         * ============================================================ */
+        body {
+            background-color: #080c14;
+            color: #f1f5f9;
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden; /* 確保絕不出現滾動條 */
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        /* 房間容器：鎖定 16:9 比例，並以 Cover 方式完美覆蓋整個網頁，四周絕不留空隙 */
+        .room-container {
+            position: relative;
+            width: 100vw;
+            height: 56.25vw; /* 16:9 的高寬比 (100 / 1.7777) */
+            min-height: 100vh;
+            min-width: 177.78vh; /* 16:9 的寬高比 (100 * 1.7777) */
+            flex-shrink: 0;
+            overflow: hidden;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+            background-color: #02040a;
+        }
+
+        /* 各互動元件防塌陷寬高比 (確保在圖片載入時仍維持比例穩定) */
+        #switch-btn { aspect-ratio: 400 / 600; }
+        #door-handle-btn { aspect-ratio: 800 / 400; }
+        #pointer-img { aspect-ratio: 800 / 800; }
+        #music-box-btn { aspect-ratio: 1 / 1; }
+        #music-note-img { aspect-ratio: 1 / 1; }
+
+        /* ============================================================
+         * 2. 互動特效與動態動畫
+         * ============================================================ */
+        
+        /* 門把點擊旋轉回彈動畫 - 恢復與 Prototype 一致的變換順序與變數結構 */
+        @keyframes doorBounce {
+            0% { transform: rotate(0deg) scale(1); }
+            30% { transform: rotate(var(--click-rotation, 19.5deg)) scale(0.95); }
+            70% { transform: rotate(-4deg) scale(1.02); }
+            100% { transform: rotate(0deg) scale(1); }
+        }
+        .door-active {
+            animation: doorBounce 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+        }
+
+        /* 音符精緻浮動、左右擺動與微微旋轉動畫 */
+        @keyframes dynamicNoteAnimation {
+            0% {
+                transform: translateY(0px) translateX(0px) rotate(0deg);
+            }
+            25% {
+                transform: translateY(calc(-1px * var(--float-amp, 10.5))) translateX(calc(1px * var(--sway-amp, 0))) rotate(calc(1deg * var(--rot-amp, 19.5)));
+            }
+            50% {
+                transform: translateY(0px) translateX(0px) rotate(0deg);
+            }
+            75% {
+                transform: translateY(calc(1px * var(--float-amp, 10.5))) translateX(calc(-1px * var(--sway-amp, 0))) rotate(calc(-1deg * var(--rot-amp, 19.5)));
+            }
+            100% {
+                transform: translateY(0px) translateX(0px) rotate(0deg);
+            }
+        }
+        .music-playing {
+            animation: dynamicNoteAnimation var(--anim-speed, 3.5s) ease-in-out infinite;
+        }
+
+        /* 互動導覽：沿著 PNG 手繪透明邊緣的增強版魔法雙層呼吸微光 (極致強化視覺引導，已全面調整為高質感金黃色) */
+        @keyframes pngGlowEffect {
+            0%, 100% { 
+                filter: drop-shadow(0 0 5px rgba(245, 158, 11, 0.75)) drop-shadow(0 0 12px rgba(251, 191, 36, 0.45)) brightness(1.05); 
+            }
+            50% { 
+                filter: drop-shadow(0 0 12px rgba(245, 158, 11, 1)) drop-shadow(0 0 30px rgba(251, 191, 36, 0.85)) brightness(1.3); 
+            }
+        }
+        .hint-glow {
+            animation: pngGlowEffect 2.4s ease-in-out infinite;
+            transition: filter 0.5s ease;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ============================================================
+     * 3. 奇幻房間主要展示容器 (滿版、保持 16:9 覆蓋)
+     * ============================================================ -->
+    <div id="room-container" class="room-container transition-all">
+        
+        <!-- [1] videoPlayer：最底層，放置窗外風景影片 -->
+        <div id="video-player" class="absolute pointer-events-none overflow-hidden select-none z-10 transition-all">
+            <video id="room-video" class="w-full h-full" autoplay muted loop playsinline></video>
+        </div>
+
+        <!-- [2] roomImage：中間層，完整覆蓋在影片上方 (視窗已挖空透明) -->
+        <div id="room-image" class="absolute pointer-events-none select-none z-20 transition-all">
+            <img id="room-image-img" class="w-full h-full object-fill" src="" alt="Room Background">
+        </div>
+
+        <!-- [3] switch：最上層互動元件 - 電燈開關 (切換日夜) -->
+        <div id="switch-btn" class="absolute cursor-pointer select-none z-30 transition-all hover:scale-105 active:scale-95 duration-200">
+            <!-- 加上 hint-glow 指引觀眾點擊 -->
+            <img id="switch-img" class="w-full h-full object-contain hint-glow" src="" alt="Switch">
+        </div>
+
+        <!-- [4] doorHandle：最上層互動元件 - 門把 (切換景點風景) -->
+        <div id="door-handle-btn" class="absolute cursor-pointer select-none z-30 transition-all hover:brightness-110">
+            <!-- 加上 hint-glow 指引觀眾點擊 -->
+            <img id="door-handle-img" class="w-full h-full object-contain hint-glow" src="" alt="Door Handle">
+        </div>
+
+        <!-- [5] pointer：最上層裝飾元件 - 計量針 (指向當前場景狀態) -->
+        <div id="pointer-img" class="absolute pointer-events-none select-none z-30 transition-all duration-500 ease-out">
+            <img id="pointer-img-img" class="w-full h-full object-contain" src="" alt="Pointer">
+        </div>
+
+        <!-- [6] musicBox：最上層互動元件 - 音樂播放底座 (播放與暫停音樂) -->
+        <div id="music-box-btn" class="absolute cursor-pointer select-none z-30 transition-all hover:scale-105 active:scale-95 duration-200">
+            <!-- 加上 hint-glow 指引觀眾點擊 -->
+            <img id="music-box-img" class="w-full h-full object-contain hint-glow" src="" alt="Music Box">
+        </div>
+
+        <!-- [7] musicNote：浮動音符 (蓋在底座最上方，播放時啟用細緻 CSS 動畫) -->
+        <div id="music-note-img" class="absolute pointer-events-none select-none z-[35]" style="transition-property: left, top, width, height;">
+            <img id="music-note-img-img" class="w-full h-full object-contain" src="" alt="Music Note">
+        </div>
+
+    </div>
+
+    <!-- ============================================================
+     * 4. JAVASCRIPT 核心互動邏輯與 CONFIG 設定
+     * ============================================================ -->
+    <script>
+        // 集中式資源與資產路徑配置 (ASSETS)
+        const ASSETS = {
+            room: {
+                day: "assets/room-day_2560x1440.png",
+                night: "assets/room-night_2560x1440.png"
+            },
+            videos: {
+                desert: {
+                    day: "assets/desert-day.mp4",
+                    night: "assets/desert-night.mp4"
+                },
+                ice: {
+                    day: "assets/ice-day.mp4",
+                    night: "assets/ice-night.mp4"
+                }
+            },
+            switch: {
+                day: "assets/switch-day_400x600.png",
+                night: "assets/switch-night_400x600.png"
+            },
+            doorHandle: {
+                day: "assets/door_handle-day_800x400.png",
+                night: "assets/door_handle-night_800x400.png"
+            },
+            pointer: {
+                day: "assets/pointer-day_800X800.png",
+                night: "assets/pointer-night_800X800.png"
+            },
+            music: {
+                desert: "assets/desert-music.mp3",
+                ice: "assets/ice-music.mp3"
+            },
+            // 音樂底座與音符已完美更換為日夜雙版路徑
+            musicBox: {
+                day: "assets/music_box-day.png",
+                night: "assets/music_box-night.png"
+            },
+            musicNote: {
+                day: "assets/music_note-day.png",
+                night: "assets/music_note-night.png"
+            }
+        };
+
+        // 最終調校完成之定位與動畫參數配置 (CONFIG)
+        const CONFIG = {
+            page: {
+                maxRoomWidth: 1400
+            },
+            roomImage: {
+                left: 0,
+                top: 0,
+                width: 100,
+                height: 100
+            },
+            videoPlayer: {
+                left: 17.7,
+                top: 12.5,
+                width: 51.8,
+                aspectRatio: 1.7777777777777777,
+                objectFit: "cover"
+            },
+            switch: {
+                left: 6.61,
+                top: 32.7,
+                width: 7.5
+            },
+            doorHandle: {
+                left: 76.57,
+                top: 52.07,
+                width: 14.23,
+                transformOrigin: "50% 50%",
+                clickRotation: 19.5
+            },
+            pointer: {
+                left: 75.78,
+                top: 13.44,
+                width: 6.4,
+                transformOrigin: "center center",
+                desertRotation: 0,
+                iceRotation: 180
+            },
+            musicBox: {
+                left: 29.2,
+                top: 65,
+                width: 11.8,
+                volume: 0.8
+            },
+            musicNote: {
+                left: 33.25,
+                top: 71.8,
+                width: 3.4,
+                transformOrigin: "15% 50%",
+                floatAmp: 10.5,
+                swayAmp: 0,
+                rotAmp: 19.5,
+                speed: 3.5
+            }
+        };
+
+        // 頁面狀態控制
+        let currentState = {
+            time: "day",          // day 或 night
+            scene: "desert"       // desert 或 ice
+        };
+
+        // 音樂播放狀態控制
+        let musicEnabled = false; 
+        let audioObj = new Audio();
+        audioObj.loop = true;
+
+        /************************************************************
+         * 5. 音效合成管理器 (SoundFX) - 使用 Web Audio API 即時產生高音質音效
+         ************************************************************/
+        const SoundFX = {
+            ctx: null,
+            
+            // 啟用音訊上下文
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                if (this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            },
+
+            // [A] 日夜開關音效 - 機械式開關卡噠雙響 (Double Snap Switch Click)
+            playSwitch() {
+                try {
+                    this.init();
+                    const now = this.ctx.currentTime;
+
+                    const osc1 = this.ctx.createOscillator();
+                    const gain1 = this.ctx.createGain();
+                    osc1.type = 'triangle';
+                    osc1.frequency.setValueAtTime(150, now);
+                    osc1.frequency.exponentialRampToValueAtTime(40, now + 0.015);
+                    
+                    gain1.gain.setValueAtTime(0.3, now);
+                    gain1.gain.exponentialRampToValueAtTime(0.0001, now + 0.015);
+                    osc1.connect(gain1);
+                    gain1.connect(this.ctx.destination);
+
+                    const osc2 = this.ctx.createOscillator();
+                    const gain2 = this.ctx.createGain();
+                    osc2.type = 'sine';
+                    osc2.frequency.setValueAtTime(600, now + 0.012);
+                    osc2.frequency.exponentialRampToValueAtTime(150, now + 0.03);
+
+                    gain2.gain.setValueAtTime(0, now);
+                    gain2.gain.setValueAtTime(0.18, now + 0.012);
+                    gain2.gain.exponentialRampToValueAtTime(0.0001, now + 0.03);
+                    osc2.connect(gain2);
+                    gain2.connect(this.ctx.destination);
+
+                    const bufferSize = this.ctx.sampleRate * 0.025;
+                    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                    const data = buffer.getChannelData(0);
+                    for (let i = 0; i < bufferSize; i++) {
+                        data[i] = Math.random() * 2 - 1;
+                    }
+                    const noise = this.ctx.createBufferSource();
+                    noise.buffer = buffer;
+
+                    const filter = this.ctx.createBiquadFilter();
+                    filter.type = 'highpass';
+                    filter.frequency.setValueAtTime(3000, now);
+
+                    const noiseGain = this.ctx.createGain();
+                    noiseGain.gain.setValueAtTime(0.05, now);
+                    noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.02);
+
+                    noise.connect(filter);
+                    filter.connect(noiseGain);
+                    noiseGain.connect(this.ctx.destination);
+
+                    osc1.start(now);
+                    osc1.stop(now + 0.02);
+                    osc2.start(now + 0.012);
+                    osc2.stop(now + 0.04);
+                    noise.start(now);
+                } catch (e) {
+                    console.warn("無法即時合成開關音效: ", e);
+                }
+            },
+
+            // [B] 門把下壓旋轉音效 - 金屬機械卡榫與彈簧釋放 (Metallic Creak & Latch)
+            playDoorHandle() {
+                try {
+                    this.init();
+                    const now = this.ctx.currentTime;
+
+                    const oscCreak = this.ctx.createOscillator();
+                    const gainCreak = this.ctx.createGain();
+                    const filterCreak = this.ctx.createBiquadFilter();
+
+                    oscCreak.type = 'sawtooth';
+                    oscCreak.frequency.setValueAtTime(60, now);
+                    oscCreak.frequency.linearRampToValueAtTime(110, now + 0.1);
+
+                    filterCreak.type = 'bandpass';
+                    filterCreak.frequency.setValueAtTime(250, now);
+
+                    gainCreak.gain.setValueAtTime(0, now);
+                    gainCreak.gain.linearRampToValueAtTime(0.12, now + 0.02);
+                    gainCreak.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+
+                    oscCreak.connect(filterCreak);
+                    filterCreak.connect(gainCreak);
+                    gainCreak.connect(this.ctx.destination);
+
+                    const oscLatch = this.ctx.createOscillator();
+                    const gainLatch = this.ctx.createGain();
+                    
+                    oscLatch.type = 'triangle';
+                    oscLatch.frequency.setValueAtTime(800, now + 0.08);
+                    oscLatch.frequency.exponentialRampToValueAtTime(120, now + 0.14);
+
+                    gainLatch.gain.setValueAtTime(0, now);
+                    gainLatch.gain.setValueAtTime(0.25, now + 0.08);
+                    gainLatch.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
+
+                    oscLatch.connect(gainLatch);
+                    gainLatch.connect(this.ctx.destination);
+
+                    const bufferSize = this.ctx.sampleRate * 0.04;
+                    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                    const data = buffer.getChannelData(0);
+                    for (let i = 0; i < bufferSize; i++) {
+                        data[i] = Math.random() * 2 - 1;
+                    }
+                    const clickNoise = this.ctx.createBufferSource();
+                    clickNoise.buffer = buffer;
+
+                    const filterNoise = this.ctx.createBiquadFilter();
+                    filterNoise.type = 'bandpass';
+                    filterNoise.frequency.setValueAtTime(4000, now + 0.08);
+
+                    const gainNoise = this.ctx.createGain();
+                    gainNoise.gain.setValueAtTime(0, now);
+                    gainNoise.gain.setValueAtTime(0.04, now + 0.08);
+                    gainNoise.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+
+                    clickNoise.connect(filterNoise);
+                    filterNoise.connect(gainNoise);
+                    gainNoise.connect(this.ctx.destination);
+
+                    oscCreak.start(now);
+                    oscCreak.stop(now + 0.11);
+                    oscLatch.start(now + 0.08);
+                    oscLatch.stop(now + 0.15);
+                    clickNoise.start(now + 0.08);
+                } catch (e) {
+                    console.warn("無法即時合成門把音效: ", e);
+                }
+            },
+
+            // [C] 音樂底座音效 - 八音盒鋼片撥弦共鳴聲 (Music Box Steel Pluck)
+            playMusicBoxClick() {
+                try {
+                    this.init();
+                    const now = this.ctx.currentTime;
+                    
+                    const oscBase = this.ctx.createOscillator();
+                    const oscHarmonic1 = this.ctx.createOscillator();
+                    const oscHarmonic2 = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+
+                    oscBase.type = 'sine';
+                    oscBase.frequency.setValueAtTime(880, now);
+
+                    oscHarmonic1.type = 'sine';
+                    oscHarmonic1.frequency.setValueAtTime(1064.8, now);
+
+                    oscHarmonic2.type = 'sine';
+                    oscHarmonic2.frequency.setValueAtTime(2156, now);
+
+                    gain.gain.setValueAtTime(0, now);
+                    gain.gain.linearRampToValueAtTime(0.22, now + 0.002);
+                    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
+
+                    oscBase.connect(gain);
+                    oscHarmonic1.connect(gain);
+                    oscHarmonic2.connect(gain);
+                    gain.connect(this.ctx.destination);
+
+                    oscBase.start(now);
+                    oscHarmonic1.start(now);
+                    oscHarmonic2.start(now);
+
+                    oscBase.stop(now + 0.5);
+                    oscHarmonic1.stop(now + 0.5);
+                    oscHarmonic2.stop(now + 0.5);
+                } catch (e) {
+                    console.warn("無法即時合成音樂底座音效: ", e);
+                }
+            }
+        };
+
+        /************************************************************
+         * A. 套用 CONFIG 到 HTML 各元件樣式
+         ************************************************************/
+        function initLayoutStyles() {
+            // 完全恢復最初的「滿版覆蓋」排版，移除任何視窗高寬限制
+            const container = document.getElementById('room-container');
+            container.style.width = "";
+            container.style.maxWidth = "";
+
+            // 房間背景底圖定位
+            const roomImg = document.getElementById('room-image');
+            roomImg.style.left = `${CONFIG.roomImage.left}%`;
+            roomImg.style.top = `${CONFIG.roomImage.top}%`;
+            roomImg.style.width = `${CONFIG.roomImage.width}%`;
+            roomImg.style.height = `${CONFIG.roomImage.height}%`;
+
+            // 窗外影片定位
+            const videoPl = document.getElementById('video-player');
+            videoPl.style.left = `${CONFIG.videoPlayer.left}%`;
+            videoPl.style.top = `${CONFIG.videoPlayer.top}%`;
+            videoPl.style.width = `${CONFIG.videoPlayer.width}%`;
+            videoPl.style.aspectRatio = `${CONFIG.videoPlayer.aspectRatio}`;
+            
+            const videoEl = document.getElementById('room-video');
+            videoEl.style.objectFit = CONFIG.videoPlayer.objectFit;
+
+            // 開關定位
+            const switchEl = document.getElementById('switch-btn');
+            switchEl.style.left = `${CONFIG.switch.left}%`;
+            switchEl.style.top = `${CONFIG.switch.top}%`;
+            switchEl.style.width = `${CONFIG.switch.width}%`;
+
+            // 門把定位與旋轉屬性設定
+            const doorEl = document.getElementById('door-handle-btn');
+            doorEl.style.left = `${CONFIG.doorHandle.left}%`;
+            doorEl.style.top = `${CONFIG.doorHandle.top}%`;
+            doorEl.style.width = `${CONFIG.doorHandle.width}%`;
+            doorEl.style.transformOrigin = CONFIG.doorHandle.transformOrigin;
+            // 修正為帶有 deg 單位的屬性值，與 CSS keyframe 的 var 配合
+            doorEl.style.setProperty('--click-rotation', `${CONFIG.doorHandle.clickRotation}deg`);
+
+            // 計量指針定位
+            const pointerEl = document.getElementById('pointer-img');
+            pointerEl.style.left = `${CONFIG.pointer.left}%`;
+            pointerEl.style.top = `${CONFIG.pointer.top}%`;
+            pointerEl.style.width = `${CONFIG.pointer.width}%`;
+            pointerEl.style.transformOrigin = CONFIG.pointer.transformOrigin;
+
+            // 音樂播放器底座定位
+            const musicBoxEl = document.getElementById('music-box-btn');
+            musicBoxEl.style.left = `${CONFIG.musicBox.left}%`;
+            musicBoxEl.style.top = `${CONFIG.musicBox.top}%`;
+            musicBoxEl.style.width = `${CONFIG.musicBox.width}%`;
+
+            // 浮動音符定位與動畫參數設定
+            const musicNoteEl = document.getElementById('music-note-img');
+            musicNoteEl.style.left = `${CONFIG.musicNote.left}%`;
+            musicNoteEl.style.top = `${CONFIG.musicNote.top}%`;
+            musicNoteEl.style.width = `${CONFIG.musicNote.width}%`;
+            musicNoteEl.style.transformOrigin = CONFIG.musicNote.transformOrigin;
+            
+            // 將 CONFIG 動畫參數轉換為無單位純數值，傳入 CSS keyframe 的 calc 當中運算
+            musicNoteEl.style.setProperty('--float-amp', CONFIG.musicNote.floatAmp);
+            musicNoteEl.style.setProperty('--sway-amp', CONFIG.musicNote.swayAmp);
+            musicNoteEl.style.setProperty('--rot-amp', CONFIG.musicNote.rotAmp);
+            musicNoteEl.style.setProperty('--anim-speed', `${CONFIG.musicNote.speed}s`);
+
+            // 設定預設音訊音量
+            audioObj.volume = CONFIG.musicBox.volume;
+        }
+
+        /************************************************************
+         * B. 切換資源與多媒體（圖片與影片更新）
+         ************************************************************/
+        function updateMedia() {
+            const time = currentState.time;
+            const scene = currentState.scene;
+
+            // 1. 更換各圖層對應之日夜圖片
+            document.getElementById('room-image-img').src = ASSETS.room[time];
+            document.getElementById('switch-img').src = ASSETS.switch[time];
+            document.getElementById('door-handle-img').src = ASSETS.doorHandle[time];
+            document.getElementById('pointer-img-img').src = ASSETS.pointer[time];
+            
+            // 2. 更換音樂播放器底座與音符對應之日夜版本圖片
+            document.getElementById('music-box-img').src = ASSETS.musicBox[time];
+            document.getElementById('music-note-img-img').src = ASSETS.musicNote[time];
+
+            // 3. 切換窗外風景影片播放路徑
+            const videoEl = document.getElementById('room-video');
+            const targetVideoPath = ASSETS.videos[scene][time];
+            
+            if (videoEl.getAttribute('data-active-src') !== targetVideoPath) {
+                videoEl.setAttribute('data-active-src', targetVideoPath);
+                videoEl.src = targetVideoPath;
+                videoEl.load();
+                videoEl.play().catch(e => {
+                    console.warn("瀏覽器阻擋自動播放窗外背景影片，此屬正常安全政策保護範疇：", e);
+                });
+            }
+
+            // 4. 更新指針角度旋轉
+            updatePointerRotation();
+        }
+
+        // 依據目前 Scene 角度旋轉指針
+        function updatePointerRotation() {
+            const pointerEl = document.getElementById('pointer-img');
+            const targetRotation = currentState.scene === "desert" 
+                ? CONFIG.pointer.desertRotation 
+                : CONFIG.pointer.iceRotation;
+            
+            pointerEl.style.transform = `rotate(${targetRotation}deg)`;
+        }
+
+        /************************************************************
+         * C. 音樂播放器控制邏輯 (Play & Pause & Sync)
+         ************************************************************/
+        function handleMusicPlay() {
+            const scene = currentState.scene;
+            const targetMusicPath = ASSETS.music[scene];
+
+            // 若音源路徑改變則進行切換
+            if (!audioObj.src.endsWith(targetMusicPath)) {
+                audioObj.src = targetMusicPath;
+            }
+
+            audioObj.play().then(() => {
+                // 音符套用 CSS 動畫進行飄逸、搖動與微旋轉
+                document.getElementById('music-note-img').classList.add('music-playing');
+            }).catch(err => {
+                console.warn("音訊播放受阻 (常發生於使用者未有點擊行為時切換場景)：", err);
+                musicEnabled = false;
+                document.getElementById('music-note-img').classList.remove('music-playing');
+            });
+        }
+
+        function handleMusicPause() {
+            audioObj.pause();
+            document.getElementById('music-note-img').classList.remove('music-playing');
+        }
+
+        /************************************************************
+         * D. 互動事件監聽綁定
+         ************************************************************/
+        function bindInteractiveEvents() {
+            
+            // 1. 點擊電燈開關 (Switch) -> 日夜切換
+            const switchBtn = document.getElementById('switch-btn');
+            switchBtn.addEventListener('click', () => {
+                currentState.time = currentState.time === "day" ? "night" : "day";
+                
+                // 播放清脆的機械式按鈕開關音效
+                SoundFX.playSwitch();
+                
+                // 移除魔法引導微光
+                document.getElementById('switch-img').classList.remove('hint-glow');
+
+                updateMedia();
+            });
+
+            // 2. 點擊門把 (Door Handle) -> 風景切換、指針旋轉與門把反彈動態
+            const doorBtn = document.getElementById('door-handle-btn');
+            doorBtn.addEventListener('click', () => {
+                currentState.scene = currentState.scene === "desert" ? "ice" : "desert";
+                
+                // 播放把手下壓扭轉彈簧與金屬卡榫咬合聲
+                SoundFX.playDoorHandle();
+
+                // 移除魔法引導微光
+                document.getElementById('door-handle-img').classList.remove('hint-glow');
+
+                // 門把反彈回動動畫
+                doorBtn.classList.remove('door-active');
+                void doorBtn.offsetWidth; // 強制瀏覽器重繪以重新觸發 Keyframe
+                doorBtn.classList.add('door-active');
+
+                updateMedia();
+
+                // 若音樂處於播放狀態 (musicEnabled = true)，同步切換場景音樂
+                if (musicEnabled) {
+                    handleMusicPlay();
+                }
+            });
+
+            // 移除門把動畫 class 確保下次點擊還能再次播放
+            doorBtn.addEventListener('animationend', () => {
+                doorBtn.classList.remove('door-active');
+            });
+
+            // 3. 點擊音樂底座 (Music Box) -> 播放與暫停音樂
+            const musicBoxBtn = document.getElementById('music-box-btn');
+            musicBoxBtn.addEventListener('click', () => {
+                
+                // 播放發條微小清脆的叩擊聲
+                SoundFX.playMusicBoxClick();
+
+                // 移除魔法引導微光
+                document.getElementById('music-box-img').classList.remove('hint-glow');
+
+                if (!musicEnabled) {
+                    musicEnabled = true;
+                    handleMusicPlay();
+                } else {
+                    musicEnabled = false;
+                    handleMusicPause();
+                }
+            });
+        }
+
+        /************************************************************
+         * E. 頁面初始化
+         ************************************************************/
+        window.addEventListener('DOMContentLoaded', () => {
+            // 初始化套用 CONFIG 位置 (改回完全滿版覆蓋)
+            initLayoutStyles();
+
+            // 載入預設時段與場景多媒體 (Time: Day / Scene: Desert)
+            updateMedia();
+
+            // 綁定各控制圖層點擊互動事件
+            bindInteractiveEvents();
+
+            // 網頁首次任意點擊時解鎖部分瀏覽器的音訊政策
+            window.addEventListener('click', () => {
+                SoundFX.init();
+                if (musicEnabled && audioObj.paused) {
+                    audioObj.play().catch(() => {});
+                }
+            }, { once: true });
+        });
+    </script>
+</body>
+</html>

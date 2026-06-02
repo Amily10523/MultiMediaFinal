@@ -1,0 +1,54 @@
+const CONFIG = {
+  page: {
+    maxRoomWidth: 1400
+  },
+  roomImage: {
+    left: 0,
+    top: 0,
+    width: 100,
+    height: 100
+  },
+  videoPlayer: {
+    left: 17.7,
+    top: 12.5,
+    width: 51.8,
+    aspectRatio: 1.7777777777777777,
+    objectFit: "cover"
+  },
+  switch: {
+    left: 6.61,
+    top: 32.7,
+    width: 7.5
+  },
+  doorHandle: {
+    left: 76.57,
+    top: 52.07,
+    width: 14.23,
+    transformOrigin: "50% 50%",
+    clickRotation: 19.5
+  },
+  pointer: {
+    left: 75.78,
+    top: 13.44,
+    width: 6.4,
+    transformOrigin: "center center",
+    desertRotation: 0,
+    iceRotation: 180
+  },
+  musicBox: {
+    left: 29.2,
+    top: 65,
+    width: 11.8,
+    volume: 0.8
+  },
+  musicNote: {
+    left: 33.25,
+    top: 71.8,
+    width: 3.4,
+    transformOrigin: "15% 50%",
+    floatAmp: 10.5,
+    swayAmp: 0,
+    rotAmp: 19.5,
+    speed: 3.5
+  }
+};
