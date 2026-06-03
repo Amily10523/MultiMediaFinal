@@ -688,6 +688,37 @@
         /************************************************************
          * E. 頁面初始化
          ************************************************************/
+        /************************************************************
+         * F. 影片預載入：頁面載入後在背景預抓所有場景影片，
+         *    讓使用者切換日夜/場景時影片已在快取，零等待不卡頓。
+         ************************************************************/
+        function preloadAllVideos() {
+            const videoPaths = [];
+            // 收集所有場景影片路徑 (desert/ice 的 day/night)
+            for (const scene in ASSETS.videos) {
+                for (const time in ASSETS.videos[scene]) {
+                    videoPaths.push(ASSETS.videos[scene][time]);
+                }
+            }
+            // 也預載貓咪影片
+            if (ASSETS.cat) videoPaths.push(ASSETS.cat);
+
+            // 用隱藏的 video 元素逐一預抓(preload=auto 會下載並快取)
+            videoPaths.forEach(path => {
+                const v = document.createElement('video');
+                v.preload = 'auto';
+                v.muted = true;
+                v.src = path;
+                v.style.display = 'none';
+                // 抓進快取後即可移除元素(快取保留)
+                v.addEventListener('canplaythrough', () => {
+                    v.remove();
+                }, { once: true });
+                v.load();
+                document.body.appendChild(v);
+            });
+        }
+
         window.addEventListener('DOMContentLoaded', () => {
             // 初始化套用 CONFIG 位置 (改回完全滿版覆蓋)
             initLayoutStyles();
@@ -697,6 +728,9 @@
 
             // 綁定各控制圖層點擊互動事件
             bindInteractiveEvents();
+
+            // 背景預載所有影片(在初始畫面顯示後才開始,不影響首屏)
+            preloadAllVideos();
 
             // 網頁首次任意點擊時解鎖部分瀏覽器的音訊政策
             window.addEventListener('click', () => {
