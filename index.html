@@ -11,7 +11,10 @@
          * 1. 基礎展示頁面樣式 (滿版無留白覆蓋)
          * ============================================================ */
         body {
-            background-color: #080c14;
+            /* 邊框色由 JS 依日夜更新;預設白日純白 */
+            --edge-color: #ffffff;
+            background-color: var(--edge-color);
+            transition: background-color 0.6s ease;
             color: #f1f5f9;
             margin: 0;
             padding: 0;
@@ -24,16 +27,13 @@
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         }
 
-        /* 房間容器：鎖定 16:9 比例，並以 Cover 方式完美覆蓋整個網頁，四周絕不留空隙 */
+        /* 房間容器:寬度永遠滿版(左右不留邊)，高度照 16:9 換算。 */
         .room-container {
             position: relative;
             width: 100vw;
-            height: 56.25vw; /* 16:9 的高寬比 (100 / 1.7777) */
-            min-height: 100vh;
-            min-width: 177.78vh; /* 16:9 的寬高比 (100 * 1.7777) */
+            height: 56.25vw; /* 100vw * 9/16，嚴格 16:9，不變形 */
             flex-shrink: 0;
             overflow: hidden;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
             background-color: #02040a;
         }
 
@@ -113,6 +113,11 @@
             <img id="room-image-img" class="w-full h-full object-fill" src="" alt="Room Background">
         </div>
 
+        <!-- [2.5] cat：前景貓咪 (自發光透明 webm，疊在房間圖之上、互動按鈕之下) -->
+        <div id="cat-video" class="absolute pointer-events-none select-none z-[25] transition-all">
+            <video id="cat-video-el" class="w-full h-full object-contain" autoplay muted loop playsinline></video>
+        </div>
+
         <!-- [3] switch：最上層互動元件 - 電燈開關 (切換日夜) -->
         <div id="switch-btn" class="absolute cursor-pointer select-none z-30 transition-all hover:scale-105 active:scale-95 duration-200">
             <!-- 加上 hint-glow 指引觀眾點擊 -->
@@ -187,7 +192,9 @@
             musicNote: {
                 day: "assets/music_note-day.png",
                 night: "assets/music_note-night.png"
-            }
+            },
+            // 前景貓咪：自發光透明 webm，日夜共用一支
+            cat: "assets/cat.webm"
         };
 
         // 最終調校完成之定位與動畫參數配置 (CONFIG)
@@ -243,6 +250,12 @@
                 swayAmp: 0,
                 rotAmp: 19.5,
                 speed: 3.5
+            },
+            // 前景貓咪定位 (prototype 微調完成的數值)
+            cat: {
+                left: 48.1,
+                top: 65.5,
+                width: 21.8
             }
         };
 
@@ -513,6 +526,18 @@
             musicNoteEl.style.setProperty('--rot-amp', CONFIG.musicNote.rotAmp);
             musicNoteEl.style.setProperty('--anim-speed', `${CONFIG.musicNote.speed}s`);
 
+            // 前景貓咪定位（地毯右側地板）
+            const catEl = document.getElementById('cat-video');
+            catEl.style.left = `${CONFIG.cat.left}%`;
+            catEl.style.top = `${CONFIG.cat.top}%`;
+            catEl.style.width = `${CONFIG.cat.width}%`;
+            // 載入貓咪自發光透明影片（日夜共用）
+            const catVideoEl = document.getElementById('cat-video-el');
+            catVideoEl.src = ASSETS.cat;
+            catVideoEl.play().catch(e => {
+                console.warn("瀏覽器阻擋自動播放貓咪影片，屬正常安全政策：", e);
+            });
+
             // 設定預設音訊音量
             audioObj.volume = CONFIG.musicBox.volume;
         }
@@ -523,6 +548,10 @@
         function updateMedia() {
             const time = currentState.time;
             const scene = currentState.scene;
+
+            // 0. 邊框色:日=純白、夜=純黑
+            const EDGE_COLORS = { day: "#ffffff", night: "#000000" };
+            document.body.style.setProperty('--edge-color', EDGE_COLORS[time]);
 
             // 1. 更換各圖層對應之日夜圖片
             document.getElementById('room-image-img').src = ASSETS.room[time];
