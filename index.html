@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>奇幻房間 Fantasy Room</title>
+    <title>魔法小屋 Magic Cottage</title>
     <!-- 使用 Tailwind CSS 進行基礎排版 -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -18,6 +18,11 @@
             --hint-c2-soft: rgba(251, 191, 36, 0.45);
             --hint-c1-strong: rgba(245, 158, 11, 1);
             --hint-c2-strong: rgba(251, 191, 36, 0.85);
+            /* 說明入口描邊 + 小卡配色(預設白天),JS 依日夜更新 */
+            --help-stroke: #2a2520;
+            --card-solid-bg: #ffffff;
+            --card-solid-fg: #000000;
+            --card-accent: #d99b1c;
             background-color: var(--edge-color);
             transition: background-color 0.6s ease;
             color: #f1f5f9;
@@ -99,6 +104,11 @@
             animation: pngGlowEffect 2.4s ease-in-out infinite;
             transition: filter 0.5s ease;
         }
+        /* 說明卡重點字:顏色由 --card-accent 控制,日金夜藍 */
+        #help-card strong {
+            color: var(--card-accent);
+            transition: color 0.5s ease;
+        }
     </style>
 </head>
 <body>
@@ -154,6 +164,60 @@
             <img id="music-note-img-img" class="w-full h-full object-contain" src="" alt="Music Note">
         </div>
 
+        <!-- [8] 說明入口：左下角問號書本 (z-40，點擊彈出說明卡，日夜換圖) -->
+        <div id="help-btn" class="absolute cursor-pointer select-none z-40 transition-transform hover:scale-110 active:scale-95"
+             style="left: 2.2%; top: 77.6%; width: 9.9%;" title="使用說明">
+            <img id="help-btn-img" class="w-full h-full object-contain" src="" alt="使用說明書本">
+        </div>
+
+        <!-- [8.5] 說明小卡：點擊入口後彈出 (z-50，背景模糊) -->
+        <div id="help-overlay" class="absolute inset-0 z-50 hidden items-center justify-center"
+             style="background: rgba(0,0,0,0.05); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);">
+            <div id="help-card" class="relative transition-all"
+                 style="width: 42%; max-width: 560px; padding: 3% 3.5%;
+                        background: var(--card-solid-bg); color: var(--card-solid-fg);
+                        border: 2px solid var(--card-solid-fg); border-radius: 14px;
+                        box-shadow: 0 12px 40px rgba(0,0,0,0.4); font-family: Georgia, 'Noto Serif TC', serif;">
+                <!-- 角落星芒裝飾 -->
+                <svg viewBox="0 0 24 24" style="position:absolute; top:10px; left:12px; width:18px; height:18px;">
+                    <path d="M12 1 L14 10 L23 12 L14 14 L12 23 L10 14 L1 12 L10 10 Z" fill="var(--card-solid-fg)" opacity="0.55"/>
+                </svg>
+                <svg viewBox="0 0 24 24" style="position:absolute; top:10px; right:12px; width:18px; height:18px;">
+                    <path d="M12 1 L14 10 L23 12 L14 14 L12 23 L10 14 L1 12 L10 10 Z" fill="var(--card-solid-fg)" opacity="0.55"/>
+                </svg>
+
+                <!-- 關閉鈕 (往下移,不與右上星芒並排) -->
+                <div id="help-close" class="absolute cursor-pointer"
+                     style="top: 44px; right: 18px; font-size: 22px; line-height: 1; opacity: 0.6;">✕</div>
+
+                <h2 style="text-align:center; font-size: 1.5em; font-weight: 700; margin: 0.2em 0 1em; letter-spacing: 1px;">
+                    ✦ Welcome to Magic Cottage ✦
+                </h2>
+                <div style="font-size: 0.98em; line-height: 2; text-align: center; font-weight: 700;">
+                    <p style="margin: 0.6em 0;">按 <strong>F11</strong> 進入全螢幕，沉浸感更佳</p>
+                    <p style="margin: 0.6em 0;">點擊<strong>發光的物品</strong>，探索房間裡的互動</p>
+                    <p style="margin: 0.6em 0;">點擊左下角的<strong>問號書本</strong>，可再次打開此說明</p>
+                </div>
+                <!-- 裝飾分隔線:魔法感星芒+菱形 -->
+                <div style="display:flex; align-items:center; justify-content:center; gap:10px; margin: 1.4em 0 0.4em; opacity:0.45;">
+                    <span style="flex:0 0 auto; font-size:0.8em;">✦</span>
+                    <span style="flex:0 1 150px; height:1px; background:var(--card-solid-fg);"></span>
+                    <span style="flex:0 0 auto; font-size:0.7em;">◇</span>
+                    <span style="flex:0 1 150px; height:1px; background:var(--card-solid-fg);"></span>
+                    <span style="flex:0 0 auto; font-size:0.8em;">✦</span>
+                </div>
+                <div style="text-align:center; margin-top: 0.8em;">
+                    <button id="help-process-btn"
+                            style="cursor:pointer; font-family: inherit; font-size: 0.95em;
+                                   padding: 0.5em 1.4em; border-radius: 999px;
+                                   background: var(--card-solid-fg); color: var(--card-solid-bg);
+                                   border: none; letter-spacing: 1px;">
+                        ✦ 看看製作過程 ✦
+                    </button>
+                </div>
+            </div>
+        </div>
+
     </div>
 
     <!-- ============================================================
@@ -202,7 +266,12 @@
                 night: "assets/music_note-night.png"
             },
             // 前景貓咪：自發光透明 webm，日夜共用一支
-            cat: "assets/cat.webm"
+            cat: "assets/cat.webm",
+            // 說明書本：日夜兩版
+            book: {
+                day: "assets/book-day.png",
+                night: "assets/book-night.png"
+            }
         };
 
         // 最終調校完成之定位與動畫參數配置 (CONFIG)
@@ -579,6 +648,17 @@
             rootStyle.setProperty('--hint-c1-strong', hint.c1strong);
             rootStyle.setProperty('--hint-c2-strong', hint.c2strong);
 
+            // 0.6 小卡配色:日(純白底黑字) / 夜(純黑底白字),重點字日金夜藍
+            if (time === "night") {
+                rootStyle.setProperty('--card-solid-bg', '#000000');
+                rootStyle.setProperty('--card-solid-fg', '#ffffff');
+                rootStyle.setProperty('--card-accent', '#60a5fa');  // 夜:藍
+            } else {
+                rootStyle.setProperty('--card-solid-bg', '#ffffff');
+                rootStyle.setProperty('--card-solid-fg', '#000000');
+                rootStyle.setProperty('--card-accent', '#d99b1c');  // 日:金
+            }
+
             // 1. 更換各圖層對應之日夜圖片
             document.getElementById('room-image-img').src = ASSETS.room[time];
             document.getElementById('switch-img').src = ASSETS.switch[time];
@@ -588,6 +668,9 @@
             // 2. 更換音樂播放器底座與音符對應之日夜版本圖片
             document.getElementById('music-box-img').src = ASSETS.musicBox[time];
             document.getElementById('music-note-img-img').src = ASSETS.musicNote[time];
+
+            // 說明書本日夜切換
+            document.getElementById('help-btn-img').src = ASSETS.book[time];
 
             // 3. 切換窗外風景影片播放路徑
             const videoEl = document.getElementById('room-video');
@@ -884,8 +967,41 @@
             // 背景預載所有影片(在初始畫面顯示後才開始,不影響首屏)
             preloadAllVideos();
 
-            // 啟動滑鼠墨線拖尾特效
+            // 啟動滑鼠星星特效
             initCursorTrail();
+
+            // 說明小卡：開 / 關 / 製作過程按鈕
+            const helpBtn = document.getElementById('help-btn');
+            const helpOverlay = document.getElementById('help-overlay');
+            const helpClose = document.getElementById('help-close');
+            const helpProcessBtn = document.getElementById('help-process-btn');
+
+            function openHelp() {
+                helpOverlay.classList.remove('hidden');
+                helpOverlay.style.display = 'flex';
+            }
+            function closeHelp() {
+                helpOverlay.classList.add('hidden');
+                helpOverlay.style.display = 'none';
+            }
+            helpBtn.addEventListener('click', (e) => { e.stopPropagation(); openHelp(); });
+            helpClose.addEventListener('click', (e) => { e.stopPropagation(); closeHelp(); });
+            // 點卡片外的遮罩也關閉
+            helpOverlay.addEventListener('click', (e) => {
+                if (e.target === helpOverlay) closeHelp();
+            });
+            // 網頁載入時預設展開說明卡(開場引導)
+            openHelp();
+            // 製作過程按鈕：之後接上頁面連結(把下面的 # 換成你的網址即可)
+            helpProcessBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const PROCESS_URL = "#"; // ← TODO: 換成製作過程頁面的網址
+                if (PROCESS_URL && PROCESS_URL !== "#") {
+                    window.open(PROCESS_URL, "_blank");
+                } else {
+                    alert("製作過程頁面即將上線！");
+                }
+            });
 
             // 網頁首次任意點擊時解鎖部分瀏覽器的音訊政策
             window.addEventListener('click', () => {
