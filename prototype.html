@@ -88,8 +88,10 @@
 
         /* 除錯框線設定：利用 outline 避免影響實際排版與尺寸計算 */
         .debug-enabled #room-image { outline: 2px dashed #a855f7; outline-offset: -2px; }
+        .debug-enabled #cat-video { outline: 2px dashed #14b8a6; outline-offset: -2px; }
         .debug-enabled #video-player { outline: 2px dashed #eab308; outline-offset: -2px; }
         .debug-enabled #switch-btn { outline: 2px dashed #ef4444; outline-offset: -2px; }
+        .debug-enabled #book-btn { outline: 2px dashed #f59e0b; outline-offset: -2px; }
         .debug-enabled #door-handle-btn { outline: 2px dashed #22c55e; outline-offset: -2px; }
         .debug-enabled #pointer-img { outline: 2px dashed #f97316; outline-offset: -2px; }
         .debug-enabled #music-box-btn { outline: 2px dashed #ec4899; outline-offset: -2px; }
@@ -195,6 +197,20 @@
                     </div>
                 </div>
 
+                <!-- 2.5. cat：前景貓咪 (自發光透明 webm，z-25 疊在房圖之上) -->
+                <div id="cat-video" class="absolute pointer-events-none select-none z-[25] transition-all">
+                    <video id="cat-video-el" class="w-full h-full object-contain" autoplay muted loop playsinline></video>
+                    <!-- 影片缺席時的 Mock 方塊 -->
+                    <div id="cat-placeholder" class="hidden absolute inset-0 bg-teal-600/80 border border-teal-300 rounded-lg flex flex-col items-center justify-center text-center p-1 shadow-lg text-white">
+                        <span class="text-[14px]">🐱</span>
+                        <span class="text-[8px] font-bold">CAT</span>
+                    </div>
+                    <!-- 除錯外框標籤 -->
+                    <div class="debug-label bg-teal-500 text-white font-mono text-[10px] px-1.5 py-0.5 rounded shadow">
+                        cat (貓咪)
+                    </div>
+                </div>
+
                 <!-- 3. switch：最上層互動元素 - 切換日夜 (day/night) -->
                 <div id="switch-btn" class="absolute cursor-pointer select-none z-30 transition-all hover:scale-105 active:scale-95 group">
                     <img id="switch-img" class="w-full h-full object-contain" src="" alt="Switch">
@@ -282,6 +298,20 @@
                     </div>
                 </div>
 
+                <!-- 9. book：說明書本 (z-30 互動層,點擊彈說明卡) -->
+                <div id="book-btn" class="absolute cursor-pointer select-none z-30 transition-all hover:scale-105 active:scale-95">
+                    <img id="book-img" class="w-full h-full object-contain" src="" alt="Book">
+                    <!-- 圖片缺席時的 Mock 方塊 -->
+                    <div id="book-placeholder" class="hidden absolute inset-0 bg-amber-700/85 border border-amber-400 rounded flex flex-col items-center justify-center text-center p-1 shadow-lg text-white">
+                        <span class="text-[14px]">📖</span>
+                        <span class="text-[8px] font-bold">BOOK</span>
+                    </div>
+                    <!-- 除錯外框標籤 -->
+                    <div class="debug-label bg-amber-500 text-white font-mono text-[10px] px-1.5 py-0.5 rounded shadow">
+                        book (說明書)
+                    </div>
+                </div>
+
             </div>
         </div>
 
@@ -365,6 +395,8 @@
                     <option value="pointer">📌 5. 計量針 (pointer)</option>
                     <option value="musicBox">🎵 6. 音樂底座 (musicBox)</option>
                     <option value="musicNote">🎶 7. 浮動音符 (musicNote)</option>
+                    <option value="cat">🐱 8. 前景貓咪 (cat)</option>
+                    <option value="book">📖 9. 說明書本 (book)</option>
                 </select>
             </div>
 
@@ -618,8 +650,15 @@
             musicNote: {
                 day: "assets/music_note-day.png",
                 night: "assets/music_note-night.png"
+            },
+            book: {
+                day: "assets/book-day.png",
+                night: "assets/book-night.png"
             }
         };
+
+        // 前景貓咪影片路徑（日夜共用）
+        const CAT_ASSET = "assets/cat.webm";
 
         /************************************************************
          * 2. 初始與控制組 CONFIG 參數 (支援音樂底座、音符及其動畫參數)
@@ -676,6 +715,16 @@
                 swayAmp: 8,     // 左右搖晃幅度 (px)
                 rotAmp: 12,     // 旋轉幅度 (deg)
                 speed: 2.0      // 動畫播放速度 (秒)
+            },
+            cat: {
+                left: 52,
+                top: 58,
+                width: 12
+            },
+            book: {
+                left: 4,
+                top: 78,
+                width: 7
             }
         };
 
@@ -792,6 +841,18 @@
             musicNoteEl.style.setProperty('--rot-amp', CONFIG.musicNote.rotAmp);
             musicNoteEl.style.setProperty('--anim-speed', `${CONFIG.musicNote.speed}s`);
 
+            // I. cat (前景貓咪)
+            const catEl = document.getElementById('cat-video');
+            catEl.style.left = `${CONFIG.cat.left}%`;
+            catEl.style.top = `${CONFIG.cat.top}%`;
+            catEl.style.width = `${CONFIG.cat.width}%`;
+
+            // J. book (說明書本)
+            const bookEl = document.getElementById('book-btn');
+            bookEl.style.left = `${CONFIG.book.left}%`;
+            bookEl.style.top = `${CONFIG.book.top}%`;
+            bookEl.style.width = `${CONFIG.book.width}%`;
+
             // 更新指針角度
             updatePointerAngle();
 
@@ -850,6 +911,24 @@
             // 支援日夜切換音樂播放器底座與音符 (musicBox 與 musicNote 日夜切換)
             document.getElementById('music-box-img').src = ASSETS.musicBox[time];
             document.getElementById('music-note-img-img').src = ASSETS.musicNote[time];
+
+            // 說明書本日夜切換
+            document.getElementById('book-img').src = ASSETS.book[time];
+
+            // 載入前景貓咪影片（日夜共用，只需載一次；載入成功則隱藏 mock 方塊）
+            const catVideoEl = document.getElementById('cat-video-el');
+            const catPlaceholder = document.getElementById('cat-placeholder');
+            if (catVideoEl.getAttribute('data-active-src') !== CAT_ASSET) {
+                catVideoEl.setAttribute('data-active-src', CAT_ASSET);
+                catVideoEl.src = CAT_ASSET;
+                catVideoEl.load();
+                catVideoEl.play().then(() => {
+                    if (catPlaceholder) catPlaceholder.classList.add('hidden');
+                }).catch(e => {
+                    // 找不到影片就顯示 mock 方塊,方便定位
+                    if (catPlaceholder) catPlaceholder.classList.remove('hidden');
+                });
+            }
 
             // 影片播放器與模擬背景淡入淡出處理
             const videoEl = document.getElementById('room-video');
@@ -936,7 +1015,8 @@
                 { imgId: 'door-handle-img', mockId: 'door-handle-placeholder' },
                 { imgId: 'pointer-img-img', mockId: 'pointer-placeholder' },
                 { imgId: 'music-box-img', mockId: 'music-box-placeholder' },
-                { imgId: 'music-note-img-img', mockId: 'music-note-placeholder' }
+                { imgId: 'music-note-img-img', mockId: 'music-note-placeholder' },
+                { imgId: 'book-img', mockId: 'book-placeholder' }
             ];
 
             elements.forEach(item => {
@@ -1336,6 +1416,16 @@
     swayAmp: ${CONFIG.musicNote.swayAmp},
     rotAmp: ${CONFIG.musicNote.rotAmp},
     speed: ${CONFIG.musicNote.speed}
+  },
+  cat: {
+    left: ${CONFIG.cat.left},
+    top: ${CONFIG.cat.top},
+    width: ${CONFIG.cat.width}
+  },
+  book: {
+    left: ${CONFIG.book.left},
+    top: ${CONFIG.book.top},
+    width: ${CONFIG.book.width}
   }
 };`;
 
