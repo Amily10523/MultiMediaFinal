@@ -995,12 +995,7 @@
             // 製作過程按鈕：之後接上頁面連結(把下面的 # 換成你的網址即可)
             helpProcessBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                const PROCESS_URL = "#"; // ← TODO: 換成製作過程頁面的網址
-                if (PROCESS_URL && PROCESS_URL !== "#") {
-                    window.open(PROCESS_URL, "_blank");
-                } else {
-                    alert("製作過程頁面即將上線！");
-                }
+                window.open("making_of.html", "_blank");
             });
 
             // 網頁首次任意點擊時解鎖部分瀏覽器的音訊政策
